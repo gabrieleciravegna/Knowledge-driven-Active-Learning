@@ -1,0 +1,10 @@
+.idea/
+.ipynb_checkpoints/
+__pycache__/
+data/Animals/
+data/PascalPart/
+data/PennFudanPed/
+images/
+models/
+results/
+*.docx
