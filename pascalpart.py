@@ -343,64 +343,76 @@ def check_box_consistency():
 
 
 class PascalPartDataset(torch.utils.data.Dataset):
-	def __init__(self, root, transforms=None):
+	def __init__(self, root, transforms=None, load=True):
 		self.root = root
 		self.transforms = transforms
 		# load all image files, sorting them to
 		# ensure that they are aligned
 		self.imgs = list(sorted(os.listdir(os.path.join(root, "Images"))))
 		self.masks = list(sorted(os.listdir(os.path.join(root, "Masks"))))
+		self.targets = [None] * len(self)
+
+		if load:
+			if os.path.isfile(os.path.join(root, "targets.pckl")):
+				self.targets = np.load(os.path.join(root, "targets.pckl"))
+			else:
+				self.build_targets()
 
 	def __getitem__(self, idx):
 		# check image mask consistency
 		image, mask = self.imgs[idx], self.masks[idx]
 		assert image.split(".")[0] in mask, f"Error in loading image {image} or mask {mask}"
 
-		# load images ad masks
+		# load image
 		img_path = os.path.join(self.root, "Images", self.imgs[idx])
-		mask_path = os.path.join(self.root, "Masks", self.masks[idx])
 		try:
 			img = Image.open(img_path).convert("RGB")
 		except OSError as e:
 			print(image)
 			raise e
-		masks = np.load(mask_path, allow_pickle=True)
-		# instances are encoded as different channels
-		num_objs = masks.shape[0]
 
-		boxes = []
-		labels = []
-		for i in range(num_objs):
-			pos = np.where(masks[i] !=0)
-			xmin = np.min(pos[1])
-			xmax = np.max(pos[1])
-			ymin = np.min(pos[0])
-			ymax = np.max(pos[0])
-			boxes.append([xmin, ymin, xmax, ymax])
-			obj_ids = np.unique(masks[i])
-			try:
-				labels.append(obj_ids[obj_ids != 0].item())
-			except BaseException:
-				print(f"Error in getting label {obj_ids}")
-		boxes = torch.as_tensor(boxes, dtype=torch.float32)
-		labels = torch.as_tensor(labels, dtype=torch.int64)
+		# load target only if it is not already in memory
+		if self.targets[idx] is None:
+			mask_path = os.path.join(self.root, "Masks", self.masks[idx])
+			masks = np.load(mask_path, allow_pickle=True)
+			# instances are encoded as different channels
+			num_objs = masks.shape[0]
 
-		image_id = torch.tensor([idx])
-		area = (boxes[:, 3] - boxes[:, 1]) * (boxes[:, 2] - boxes[:, 0])
-		degenerated_aerea = area <= 0.1
-		if degenerated_aerea.any():
-			boxes = boxes[area >= 0.1, :]
-			labels = labels[area >= 0.1]
+			boxes = []
+			labels = []
+			for i in range(num_objs):
+				pos = np.where(masks[i] !=0)
+				xmin = np.min(pos[1])
+				xmax = np.max(pos[1])
+				ymin = np.min(pos[0])
+				ymax = np.max(pos[0])
+				boxes.append([xmin, ymin, xmax, ymax])
+				obj_ids = np.unique(masks[i])
+				try:
+					labels.append(obj_ids[obj_ids != 0].item())
+				except BaseException:
+					print(f"Error in getting label {obj_ids}")
+			boxes = torch.as_tensor(boxes, dtype=torch.float32)
+			labels = torch.as_tensor(labels, dtype=torch.int64)
 
-		# check for crowded instances (not counted in test evaluation)
-		iscrowd = torch.tensor([num_objs > 50] * num_objs, dtype=torch.int64)
+			image_id = torch.tensor([idx])
+			area = (boxes[:, 3] - boxes[:, 1]) * (boxes[:, 2] - boxes[:, 0])
+			degenerated_aerea = area <= 0.1
+			if degenerated_aerea.any():
+				boxes = boxes[area >= 0.1, :]
+				labels = labels[area >= 0.1]
 
-		target = {}
-		target["boxes"] = boxes
-		target["labels"] = labels
-		target["image_id"] = image_id
-		target["area"] = area
-		target["iscrowd"] = iscrowd
+			# check for crowded instances (not counted in test evaluation)
+			iscrowd = torch.tensor([num_objs > 50] * num_objs, dtype=torch.int64)
+
+			target = {}
+			target["boxes"] = boxes
+			target["labels"] = labels
+			target["image_id"] = image_id
+			target["area"] = area
+			target["iscrowd"] = iscrowd
+		else:
+			target = self.targets[idx]
 
 		if self.transforms is not None:
 			img, target = self.transforms(img, target)
@@ -410,6 +422,17 @@ class PascalPartDataset(torch.utils.data.Dataset):
 	def __len__(self):
 		return len(self.masks)
 
+	def build_targets(self):
+		print("Building dataset targets")
+		loader = torch.utils.data.DataLoader(
+			self, batch_size=2, num_workers=8, collate_fn=utils.collate_fn)
+		pbar = tqdm.trange(len(loader))
+		for i, data in enumerate(loader):
+			target = self.__getitem__(i)[1]
+			self.targets[i] = target
+			pbar.update()
+		np.save(os.path.join(self.root, "targets.pckl"), self.targets,
+		        allow_pickle=True)
 
 def check_dataset():
 	dataset = PascalPartDataset('data/PascalPart', my_utils.get_transform(train=True))
@@ -419,6 +442,11 @@ def check_dataset():
 	pbar = tqdm.trange(len(data_loader))
 	for i, data in enumerate(data_loader):
 		pbar.update()
+
+
+def check_dataset_loading():
+	PascalPartDataset('data/PascalPart',
+	                  my_utils.get_transform(train=True), load=True)
 
 
 if __name__ == "__main__":
@@ -434,6 +462,6 @@ if __name__ == "__main__":
 
 	# check_box_consistency()
 
-	check_dataset()
+	check_dataset_loading()
 
 
