@@ -1,8 +1,30 @@
-
+import numpy as np
 import torchvision
+from PIL import Image
 from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
 from torchvision.models.detection.mask_rcnn import MaskRCNNPredictor
 import vision_utils.transforms as T
+
+
+def visualize_boxes(image, prediction, names, show=True):
+	from PIL import ImageDraw
+	im = Image.fromarray(image.mul(255).permute(1, 2, 0).byte().numpy())
+	boxes = prediction['boxes'].cpu().numpy()
+	labels = prediction['labels'].cpu().numpy()
+	if "score" in prediction:
+		scores = prediction['scores'].cpu().numpy()
+	else:
+		scores = np.ones_like(labels)
+	names = [names[label] for label in labels]
+	im_draw = ImageDraw.Draw(im)
+	for box, score, name in zip(boxes, scores, names):
+		if score > 0.5:
+			im_draw.rectangle(box)
+			corner = tuple(box[:2] + np.asarray([0, -10]))
+			im_draw.text(corner, f"{name}: {score}")
+	if show:
+		im.show()
+	return im
 
 
 def get_transform(train: bool = True):
