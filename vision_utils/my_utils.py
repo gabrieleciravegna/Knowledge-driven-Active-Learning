@@ -4,6 +4,7 @@ from PIL import Image
 from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
 from torchvision.models.detection.mask_rcnn import MaskRCNNPredictor
 import vision_utils.transforms as T
+from .my_model import my_fasterrcnn_resnet50_fpn
 
 
 def visualize_boxes(image, prediction, names, show=True):
@@ -44,7 +45,8 @@ def get_transform(train: bool = True):
 
 def get_instance_segmentation_model(num_classes):
 	# load an object recognizer model pre-trained on COCO
-	model = torchvision.models.detection.fasterrcnn_resnet50_fpn(pretrained=True)
+	model = my_fasterrcnn_resnet50_fpn(pretrained=True)
+	# model = torchvision.models.detection.my_fasterrcnn_resnet50_fpn(pretrained=True)
 	# model = torchvision.models.detection.fasterrcnn_mobilenet_v3_large_fpn(pretrained=True)
 
 	# get the number of input features for the classifier

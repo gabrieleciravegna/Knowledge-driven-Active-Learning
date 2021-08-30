@@ -18,7 +18,7 @@ dataset_test = torch.utils.data.Subset(dataset_test, indices[n_train:n_train*2])
 
 # define training and validation data loaders
 data_loader = torch.utils.data.DataLoader(
-    dataset, batch_size=2, shuffle=True, num_workers=8,
+    dataset, batch_size=2, shuffle=True, num_workers=0,
     collate_fn=utils.collate_fn)
 
 data_loader_test = torch.utils.data.DataLoader(
@@ -58,7 +58,7 @@ for epoch in range(num_epochs):
     loss = metrics.meters['loss'].global_avg
 
     if epoch % 10 == 0:
-        # update the learnsing rate[
+        # update the learning rate
         lr_scheduler.step()
 
         # evaluate on the train dataset

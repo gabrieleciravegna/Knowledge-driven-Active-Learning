@@ -4,6 +4,7 @@ import time
 import torch
 
 import torchvision.models.detection.mask_rcnn
+from torchvision.models.detection.roi_heads import fastrcnn_loss
 
 from .coco_utils import get_coco_api_from_dataset
 from .coco_eval import CocoEvaluator
@@ -79,7 +80,7 @@ coco_evaluator = None
 
 
 @torch.no_grad()
-def evaluate(model, data_loader, device, verbose=True, load=False):
+def evaluate(model, data_loader, device, verbose=True, load=True, return_only_stats=False):
     global coco, iou_types, coco_evaluator
 
     orig_stdout = sys.stdout
@@ -101,22 +102,27 @@ def evaluate(model, data_loader, device, verbose=True, load=False):
     if not load or coco_evaluator is None:
         coco_evaluator = CocoEvaluator(coco, iou_types)
 
+    outputs, losses = [], []
     for images, targets in metric_logger.log_every(data_loader, 100, header):
         images = list(img.to(device) for img in images)
 
         if torch.cuda.is_available():
             torch.cuda.synchronize()
         model_time = time.time()
-        outputs = model(images)
 
-        outputs = [{k: v.to(cpu_device) for k, v in t.items()} for t in outputs]
+        o, loss_dict = model(images, targets)
+
+        o = [{k: v.to(cpu_device) for k, v in t.items()} for t in o]
         model_time = time.time() - model_time
 
-        res = {target["image_id"].item(): output for target, output in zip(targets, outputs)}
+        res = {target["image_id"].item(): output for target, output in zip(targets, o)}
         evaluator_time = time.time()
         coco_evaluator.update(res)
         evaluator_time = time.time() - evaluator_time
         metric_logger.update(model_time=model_time, evaluator_time=evaluator_time)
+
+        reduced_loss = sum(loss for loss in loss_dict.values())
+        outputs.append(o), losses.append(reduced_loss)
 
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
@@ -128,5 +134,35 @@ def evaluate(model, data_loader, device, verbose=True, load=False):
     coco_evaluator.summarize()
     torch.set_num_threads(n_threads)
 
+    mAP = coco_evaluator.coco_eval['bbox'].stats[0]
     sys.stdout = orig_stdout
-    return coco_evaluator
+
+    if return_only_stats:
+        return coco_evaluator
+
+    return mAP, outputs, losses
+
+
+# def predict(model, data_loader, device, print_freq=10, verbose=True):
+#     orig_stdout = sys.stdout
+#     if not verbose:
+#         sys.stdout = None
+#
+#     model.eval()
+#     metric_logger = utils.MetricLogger(delimiter="  ")
+#
+#     for images, targets in metric_logger.log_every(data_loader, print_freq):
+#         images = list(image.to(device) for image in images)
+#         targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
+#
+#         loss_dict = model(images, targets)
+#         # reduce losses over all GPUs for logging purposes
+#         loss_dict_reduced = utils.reduce_dict(loss_dict)
+#         losses_reduced = sum(loss for loss in loss_dict_reduced.values())
+#
+#         metric_logger.update(loss=losses_reduced, **loss_dict_reduced)
+#
+#     sys.stdout = orig_stdout
+#
+#     return metric_logger
+
