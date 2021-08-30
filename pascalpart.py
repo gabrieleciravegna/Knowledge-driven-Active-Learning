@@ -7,6 +7,8 @@ import tqdm
 
 import torch.utils.data
 from PIL import Image
+from torch.utils.data import DataLoader
+
 from vision_utils import utils, my_utils
 
 mappings = {
@@ -353,8 +355,10 @@ class PascalPartDataset(torch.utils.data.Dataset):
 		self.targets = [None] * len(self)
 
 		if load:
-			if os.path.isfile(os.path.join(root, "targets.pckl")):
-				self.targets = np.load(os.path.join(root, "targets.pckl"))
+			if os.path.isfile(os.path.join(root, "targets.npy")):
+				self.targets = np.load(os.path.join(root, "targets.npy"),
+				                       allow_pickle=True)
+				print("Targets loaded")
 			else:
 				self.build_targets()
 
@@ -373,6 +377,7 @@ class PascalPartDataset(torch.utils.data.Dataset):
 
 		# load target only if it is not already in memory
 		if self.targets[idx] is None:
+			# print("Think about loading the dataset ahead, it may speed up a lot loading procedure")
 			mask_path = os.path.join(self.root, "Masks", self.masks[idx])
 			masks = np.load(mask_path, allow_pickle=True)
 			# instances are encoded as different channels
@@ -412,6 +417,7 @@ class PascalPartDataset(torch.utils.data.Dataset):
 			target["area"] = area
 			target["iscrowd"] = iscrowd
 		else:
+			# print("Target already in memory")
 			target = self.targets[idx]
 
 		if self.transforms is not None:
@@ -431,8 +437,9 @@ class PascalPartDataset(torch.utils.data.Dataset):
 			target = self.__getitem__(i)[1]
 			self.targets[i] = target
 			pbar.update()
-		np.save(os.path.join(self.root, "targets.pckl"), self.targets,
+		np.save(os.path.join(self.root, "targets"), self.targets,
 		        allow_pickle=True)
+
 
 def check_dataset():
 	dataset = PascalPartDataset('data/PascalPart', my_utils.get_transform(train=True))
@@ -464,4 +471,20 @@ if __name__ == "__main__":
 
 	check_dataset_loading()
 
-
+	# import time
+	# dataset = PascalPartDataset('data/PascalPart',
+	#                             my_utils.get_transform(train=True), load=False)
+	# data_loader = DataLoader(dataset, batch_size=2, num_workers=0,
+	#                          shuffle=True, collate_fn=utils.collate_fn)
+	#
+	# t = time.time()
+	# _, _ = data_loader.__iter__().next()
+	# print(f"Elapsed {time.time() - t} s")
+	#
+	# dataset = PascalPartDataset('data/PascalPart',
+	#                             my_utils.get_transform(train=True), load=True)
+	# data_loader = DataLoader(dataset, batch_size=2, num_workers=0,
+	#                          shuffle=True, collate_fn=utils.collate_fn)
+	# t = time.time()
+	# _, _ = data_loader.__iter__().next()
+	# print(f"Elapsed {time.time() - t} s")
