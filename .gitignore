@@ -8,3 +8,7 @@ images/
 experiments/models/
 results/
 *.docx
+/data/
+/experiments/old/
+/kal/old/
+/kal/active_strategies/old/
