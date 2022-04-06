@@ -1,24 +1,30 @@
+from torch.utils.data import Subset
 import math
+import os
 import sys
 import time
+
+import pickle
 import torch
 
 import torchvision.models.detection.mask_rcnn
-from torchvision.models.detection.roi_heads import fastrcnn_loss
+from typing import Union, Tuple, List
 
 from .coco_utils import get_coco_api_from_dataset
 from .coco_eval import CocoEvaluator
-from . import utils
+from . import vis_utils
 
 
 def train_one_epoch(model, optimizer, data_loader, device, epoch, print_freq, verbose=True):
     orig_stdout = sys.stdout
+    orig_stderr = sys.stderr
     if not verbose:
         sys.stdout = None
+        sys.stderr = None
 
     model.train()
-    metric_logger = utils.MetricLogger(delimiter="  ")
-    metric_logger.add_meter('lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
+    metric_logger = vis_utils.MetricLogger(delimiter="  ")
+    metric_logger.add_meter('lr', vis_utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
     header = 'Epoch: [{}]'.format(epoch)
 
     lr_scheduler = None
@@ -26,7 +32,7 @@ def train_one_epoch(model, optimizer, data_loader, device, epoch, print_freq, ve
         warmup_factor = 1. / 1000
         warmup_iters = min(1000, len(data_loader) - 1)
 
-        lr_scheduler = utils.warmup_lr_scheduler(optimizer, warmup_iters, warmup_factor)
+        lr_scheduler = vis_utils.warmup_lr_scheduler(optimizer, warmup_iters, warmup_factor)
 
     for images, targets in metric_logger.log_every(data_loader, print_freq, header):
         images = list(image.to(device) for image in images)
@@ -37,7 +43,7 @@ def train_one_epoch(model, optimizer, data_loader, device, epoch, print_freq, ve
         losses = sum(loss for loss in loss_dict.values())
 
         # reduce losses over all GPUs for logging purposes
-        loss_dict_reduced = utils.reduce_dict(loss_dict)
+        loss_dict_reduced = vis_utils.reduce_dict(loss_dict)
         losses_reduced = sum(loss for loss in loss_dict_reduced.values())
 
         loss_value = losses_reduced.item()
@@ -58,6 +64,7 @@ def train_one_epoch(model, optimizer, data_loader, device, epoch, print_freq, ve
         metric_logger.update(lr=optimizer.param_groups[0]["lr"])
 
     sys.stdout = orig_stdout
+    sys.stderr = orig_stderr
 
     return metric_logger
 
@@ -74,46 +81,66 @@ def _get_iou_types(model):
     return iou_types
 
 
-coco = None
-iou_types = None
-coco_evaluator = None
-
-
 @torch.no_grad()
-def evaluate(model, data_loader, device, verbose=True, load=True, return_only_stats=False):
-    global coco, iou_types, coco_evaluator
+def evaluate(model, data_loader, device, evaluate_loss=False, verbose=True) -> \
+        Union[Tuple[float, List],
+              Tuple[float, List, torch.Tensor]]:
 
     orig_stdout = sys.stdout
+    orig_stderr = sys.stderr
     if not verbose:
         sys.stdout = None
+        sys.stderr = None
 
+    print("Evaluating")
     n_threads = torch.get_num_threads()
     # FIXME remove this and make paste_masks_in_image run on the GPU
     torch.set_num_threads(1)
     cpu_device = torch.device("cpu")
     model.eval()
-    metric_logger = utils.MetricLogger(delimiter="  ")
+    metric_logger = vis_utils.MetricLogger(delimiter="  ")
     header = 'Test:'
 
-    if not load or coco is None:
+    load = True
+    dataset = data_loader.dataset
+    while isinstance(dataset, Subset):
+        dataset = dataset.dataset
+    coco_file = os.path.join(dataset.root, "coco_evaluator.pckl")
+    if os.path.exists(coco_file) and load:
+        with open(coco_file, "rb") as f:
+            coco_evaluator = pickle.load(f)
+        print("Coco evaluator loaded")
+    else:
+        print("Creating Coco API for current dataset")
+        coco_time = time.time()
         coco = get_coco_api_from_dataset(data_loader.dataset)
-    if not load or iou_types is None:
         iou_types = _get_iou_types(model)
-    if not load or coco_evaluator is None:
         coco_evaluator = CocoEvaluator(coco, iou_types)
+        coco_time = time.time() - coco_time
+        with open(coco_file, "wb") as f:
+            pickle.dump(coco_evaluator, f)
+        print(f"Coco created in {coco_time}s")
 
+    loss_dict = None
     outputs, losses = [], []
+    # data_loader.num_workers = 0  # TODO: take out
     for images, targets in metric_logger.log_every(data_loader, 100, header):
         images = list(img.to(device) for img in images)
+        targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
 
         if torch.cuda.is_available():
             torch.cuda.synchronize()
+
         model_time = time.time()
+        o = model(images, targets)
 
-        o, loss_dict = model(images, targets)
+        if evaluate_loss:
+            model.train()
+            loss_dict = model(images, targets)
+            model.eval()
 
-        o = [{k: v.to(cpu_device) for k, v in t.items()} for t in o]
         model_time = time.time() - model_time
+        o = [{k: v.to(cpu_device) for k, v in t.items()} for t in o]
 
         res = {target["image_id"].item(): output for target, output in zip(targets, o)}
         evaluator_time = time.time()
@@ -121,8 +148,10 @@ def evaluate(model, data_loader, device, verbose=True, load=True, return_only_st
         evaluator_time = time.time() - evaluator_time
         metric_logger.update(model_time=model_time, evaluator_time=evaluator_time)
 
-        reduced_loss = sum(loss for loss in loss_dict.values())
-        outputs.append(o), losses.append(reduced_loss)
+        if evaluate_loss:
+            reduced_loss = sum(loss for loss in loss_dict.values())
+            losses.append(reduced_loss)
+        outputs.extend(o)
 
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
@@ -134,13 +163,15 @@ def evaluate(model, data_loader, device, verbose=True, load=True, return_only_st
     coco_evaluator.summarize()
     torch.set_num_threads(n_threads)
 
-    mAP = coco_evaluator.coco_eval['bbox'].stats[0]
+    mAP = coco_evaluator.coco_eval['bbox'].stats[0] * 100
     sys.stdout = orig_stdout
+    sys.stderr = orig_stderr
 
-    if return_only_stats:
-        return coco_evaluator
+    if evaluate_loss:
+        losses = torch.stack(losses).cpu()
+        return mAP, outputs, losses
 
-    return mAP, outputs, losses
+    return mAP, outputs
 
 
 # def predict(model, data_loader, device, print_freq=10, verbose=True):

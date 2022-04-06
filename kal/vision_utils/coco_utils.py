@@ -8,6 +8,8 @@ import torchvision
 
 from pycocotools import mask as coco_mask
 from pycocotools.coco import COCO
+from torch.utils.data import DataLoader
+from tqdm import tqdm
 
 from . import transforms as T
 
@@ -53,9 +55,7 @@ class ConvertCocoPolysToMask(object):
 
         image_id = target["image_id"]
         image_id = torch.tensor([image_id])
-
         anno = target["annotations"]
-
         anno = [obj for obj in anno if obj['iscrowd'] == 0]
 
         boxes = [obj["bbox"] for obj in anno]
@@ -149,10 +149,14 @@ def convert_to_coco_api(ds):
     ann_id = 1
     dataset = {'images': [], 'categories': [], 'annotations': []}
     categories = set()
-    for img_idx in range(len(ds)):
+    d_loader = DataLoader(ds, batch_size=1, num_workers=0)
+    for data in tqdm(d_loader):
         # find better way to get target
         # targets = ds.get_annotations(img_idx)
-        img, targets = ds[img_idx]
+        # img, targets = ds[img_idx]
+        img, targets = data
+        img = img[0]
+        targets = {key: value[0] for key, value in targets.items()}
         image_id = targets["image_id"].item()
         img_dict = {}
         img_dict['id'] = image_id
@@ -199,11 +203,12 @@ def get_coco_api_from_dataset(dataset):
     for _ in range(10):
         if isinstance(dataset, torchvision.datasets.CocoDetection):
             break
-        # if isinstance(dataset, torch.utils.data.Subset):
-        #     dataset = dataset.dataset
+        if isinstance(dataset, torch.utils.data.Subset):
+            dataset = dataset.dataset
     if isinstance(dataset, torchvision.datasets.CocoDetection):
         return dataset.coco
-    return convert_to_coco_api(dataset)
+    coco = convert_to_coco_api(dataset)
+    return coco
 
 
 class CocoDetection(torchvision.datasets.CocoDetection):

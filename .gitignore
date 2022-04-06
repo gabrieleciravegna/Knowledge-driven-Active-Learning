@@ -2,9 +2,9 @@
 .ipynb_checkpoints/
 __pycache__/
 data/Animals/
-data/PascalPart/
-data/PennFudanPed/
+data/old_PascalPart/
+data/PennFudanPed_old/
 images/
-models/
+experiments/models/
 results/
 *.docx
