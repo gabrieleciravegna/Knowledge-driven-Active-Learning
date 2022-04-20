@@ -1,6 +1,5 @@
 from typing import Tuple, List
 
-import numpy as np
 import torch
 import torch.nn.functional as F
 
@@ -15,20 +14,21 @@ class AdversarialBIMSampling(Strategy):
         self.k_sample = k_sample
         self.max_iter = max_iter
 
-    def loss(self, preds, *args, clf: torch.nn.Module = None, x: torch.Tensor = None,
-             **kwargs) -> torch.Tensor:
+    def loss(self, preds: torch.Tensor, *args, clf: torch.nn.Module = None,
+             x: torch.Tensor = None, **kwargs) -> torch.Tensor:
         assert clf is not None, "Need to pass the classifier in the Adv DeepFool selection"
         assert x is not None, "Need to pass the Input data in the Adv DeepFool selection"
         assert len(preds.shape) > 1, "Adversarial Sampling requires multi-class prediction"
 
+        dev = next(clf.parameters()).device
         dis = torch.zeros(x.shape[0])
         for j in range(x.shape[0]):
             x_j = x[j]
-            nx = torch.unsqueeze(x_j, 0)
+            nx = torch.unsqueeze(x_j, 0).to(dev)
             nx.requires_grad_()
-            eta = torch.zeros(nx.shape)
+            eta = torch.zeros(nx.shape).to(dev)
 
-            out = clf(nx + eta, logits=True)
+            _, out = clf(nx + eta, return_logits=True)
             py = out.max(1)[1]
             ny = out.max(1)[1]
 
@@ -45,7 +45,7 @@ class AdversarialBIMSampling(Strategy):
                 eta += self.eps * torch.sign(nx.grad.data)
                 nx.grad.data.zero_()
 
-                out = clf(nx + eta, logits=True)
+                _, out = clf(nx + eta, return_logits=True)
                 py = out.max(1)[1]
 
             if i_iter == self.max_iter:
@@ -61,15 +61,22 @@ class AdversarialBIMSampling(Strategy):
         assert x is not None, "Need to pass the Input data in the Adv DeepFool selection"
 
         n_sample = preds.shape[0]
-        avail_idx = np.asarray(list(set(np.arange(n_sample)) - set(labelled_idx)))
-        avail_preds = preds[avail_idx]
-        rand_idx = torch.randperm(avail_idx.shape[0])[:self.k_sample]
+
+        rand_idx = torch.randperm(n_sample)[:self.k_sample]
         rand_x = x[rand_idx]
 
-        adv_loss = self.loss(avail_preds, *args, clf=clf, x=rand_x, **kwargs)
+        adv_loss = self.loss(preds, *args, clf=clf, x=rand_x, **kwargs)
+
+        labelled_rand_idx = [i for i, idx in enumerate(rand_idx)
+                             if idx in labelled_idx]
+        if len(labelled_rand_idx) > 0:
+            adv_loss[torch.as_tensor(labelled_rand_idx)] = 1e30
 
         adv_idx = torch.argsort(adv_loss)
         adv_idx = rand_idx[adv_idx]
         adv_idx = adv_idx[:n_p].detach().cpu().numpy().tolist()
+
+        assert torch.as_tensor([idx not in labelled_idx for idx in adv_idx]).all(), \
+            "Error: selected idx already labelled"
 
         return adv_idx, adv_loss

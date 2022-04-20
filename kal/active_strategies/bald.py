@@ -1,8 +1,7 @@
 from typing import Tuple, List
 
-import numpy as np
 import torch
-from torch.utils.data import Subset, Dataset
+from torch.utils.data import TensorDataset
 
 from kal.active_strategies.strategy import Strategy
 from kal.network import predict_dropout_splits
@@ -28,17 +27,18 @@ class BALDSampling(Strategy):
         return uncertainties
 
     def selection(self, preds: torch.Tensor, labelled_idx: list, n_p: int,
-                  *args, dataset: Dataset = None, clf=None, **kwargs) -> Tuple[List, torch.Tensor]:
+                  *args, dataset: TensorDataset = None, clf=None, **kwargs) -> Tuple[List, torch.Tensor]:
         assert dataset is not None, "BALDSampling requires the dataset to compute the entropy over splits"
         assert clf is not None,  "BALDSampling requires to classifier to computer the predictions over splits"
 
-        n_sample = preds.shape[0]
-        avail_idx = np.asarray(list(set(np.arange(n_sample)) - set(labelled_idx)))
-        avail_data = Subset(dataset, avail_idx)
+        b_loss = self.loss(preds, clf=clf, dataset=dataset)
+
+        b_loss[torch.as_tensor(labelled_idx)] = -1
         
-        e_loss = self.loss(preds, clf=clf, dataset=avail_data)
+        b_idx = torch.argsort(b_loss, descending=True)
+        b_idx = b_idx[:n_p].detach().cpu().numpy().tolist()
 
-        e_idx = torch.argsort(e_loss, descending=True)
-        e_idx = e_idx[:-len(labelled_idx)].detach().cpu().numpy().tolist()
-
-        return e_idx[:n_p], e_loss
+        assert torch.as_tensor([idx not in labelled_idx for idx in b_idx]).all(), \
+            "Error: selected idx already labelled"
+        
+        return b_idx, b_loss

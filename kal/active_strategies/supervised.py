@@ -37,6 +37,9 @@ class SupervisedSampling(Strategy):
         s_loss = self.loss(preds, labels)
 
         s_loss[torch.as_tensor(labelled_idx)] = -1
-        sup_idx: List = torch.argsort(s_loss, descending=True).tolist()[:n_p]
+        sup_idx: List = torch.argsort(s_loss, descending=True).cpu().numpy().tolist()[:n_p]
+
+        assert torch.as_tensor([idx not in labelled_idx for idx in sup_idx]).all(), \
+            "Error: selected idx already labelled"
 
         return sup_idx, s_loss

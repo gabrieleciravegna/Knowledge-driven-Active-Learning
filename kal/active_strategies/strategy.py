@@ -1,5 +1,6 @@
 from typing import List, Tuple
 
+import numpy as np
 import torch
 
 
@@ -12,7 +13,7 @@ class Strategy:
         raise NotImplementedError()
 
     def selection(self, preds: torch.Tensor, labelled_idx: list, n_p: int,
-                  *args, **kwargs) -> Tuple[List, torch.Tensor]:
+                  *args, **kwargs) -> Tuple[List[np.ndarray], torch.Tensor]:
         raise NotImplementedError()
 
 

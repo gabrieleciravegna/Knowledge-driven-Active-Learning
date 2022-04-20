@@ -1,3 +1,5 @@
+from statistics import mean
+
 if __name__ == "__main__":
 
     # %% md
@@ -6,6 +8,7 @@ if __name__ == "__main__":
 
     # %% md
     import os
+
     os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 
     import datetime
@@ -58,6 +61,8 @@ if __name__ == "__main__":
     n_points = 5
     n_iterations = 98
     seeds = range(10)
+    lr = 0.003
+    epochs = 100
     x_t = torch.rand(tot_points, 2).to(dev)
     y_t = (((x_t[:, 0] > 0.5) & (x_t[:, 1] < 0.5)) |
            ((x_t[:, 1] > 0.5) & (x_t[:, 0] < 0.5))
@@ -67,38 +72,44 @@ if __name__ == "__main__":
     dataset = TensorDataset(x_t, y_t)
     dataset_multi = TensorDataset(x_t, y_multi_t)
 
-    # sns.scatterplot(x=x[:, 0], y=x[:, 1], hue=y)
+    # sns.scatterplot(x=x_t[:, 0].numpy(), y=x_t[:, 1].numpy(), hue=y_t.numpy())
     # plt.savefig(f"{image_folder}\\data_labelling.png")
     # plt.show()
 
     # %% md
     #### Defining constraints as product t-norm of the FOL rule expressing the XOR
     # %%
-
-    k_loss = KLoss()(y_t, x=x_t)
-    # sns.scatterplot(x=x[:, 0], y=x[:, 1], hue=k_loss)
+    # preds = MLP(1, 2, 100)(x_t).detach().squeeze()
+    #
+    # k_loss = KLoss()(y_t, x=x_t)
+    # sns.scatterplot(x=x_t[:, 0].numpy(), y=x_t[:, 1].numpy(), hue=k_loss.numpy())
+    # plt.show()
+    #
+    # k_loss = KLoss(uncertainty=True)(preds, x=x_t)
+    # sns.scatterplot(x=x_t[:, 0].numpy(), y=x_t[:, 1].numpy(), hue=k_loss.numpy())
+    # plt.show()
+    #
+    # s_loss = torch.nn.BCELoss(reduction="none")(preds, y_t)
+    # sns.scatterplot(x=x_t[:, 0].numpy(), y=x_t[:, 1].numpy(), hue=s_loss.numpy())
     # plt.show()
 
     # %%md
     #### Calculating the prediction of the rule
     # %%
 
-    discrete_x = steep_sigmoid(x_t, k=100).float()
+    discrete_x = steep_sigmoid(x_t, k=10).float()
     x1 = discrete_x[:, 0]
     x2 = discrete_x[:, 1]
     pred_rule = (x1 * (1 - x2)) + (x2 * (1 - x1))
-
     print("Rule Accuracy:",
           (pred_rule > 0.5).eq(y_t).sum().item() / y_t.shape[0] * 100)
-
-    # sns.scatterplot(x=x[:, 0], y=x[:, 1], hue=pred_rule)
+    # sns.scatterplot(x=x_t[:, 0].numpy(), y=x_t[:, 1].numpy(), hue=pred_rule)
     # plt.show()
 
     #### Active Learning Strategy Comparison
-    load = False
+    load = True
     dfs = []
     first_idx = [torch.randperm(tot_points)[:first_points].numpy().tolist() for _ in seeds]
-
     for strategy in strategies:
         for seed in seeds:
             active_strategy = SAMPLING_STRATEGIES[strategy](k_loss=KLoss)
@@ -126,6 +137,7 @@ if __name__ == "__main__":
             if strategy in [ADV_DEEPFOOL, ADV_BIM, ENTROPY, ENTROPY_D, BALD]:
                 num_classes = 2
                 train_dataset = dataset_multi
+                loss = torch.nn.CrossEntropyLoss(reduction="none")
                 if strategy in [ENTROPY, ENTROPY_D, BALD]:
                     dropout = True
                 else:
@@ -134,23 +146,27 @@ if __name__ == "__main__":
                 num_classes = 1
                 train_dataset = dataset
                 dropout = False
+                loss = torch.nn.BCEWithLogitsLoss(reduction="none")
 
             net = MLP(input_size=2, hidden_size=100, n_classes=num_classes,
                       dropout=dropout).to(dev)
             metric = MultiLabelAccuracy(num_classes)
-            loss = torch.nn.BCELoss(reduction="none")
 
             # first training with few randomly selected data
             used_idx = first_idx[seed].copy()
-            losses = train_loop(net, train_dataset, used_idx, loss=loss, visualize_loss=True)
-            accuracy, _, sup_loss = evaluate(net, train_dataset, metric=metric)
+            losses = train_loop(net, train_dataset, used_idx, epochs,
+                                lr=lr, loss=loss, visualize_loss=True)
+            accuracy, _, sup_loss = evaluate(net, train_dataset,
+                                             metric=metric, loss=loss)
 
             for it in (pbar := tqdm.trange(1, n_iterations + 1)):
-                pbar.set_description(f"{strategy}, seed {seed + 1}/{len(seeds)}, "
-                                     f"acc: {accuracy:.2f}, l: {sup_loss.mean():.2f}, p: {len(used_idx)}")
+                pbar.set_description(f"{strategy} {seed + 1}/{len(seeds)}, "
+                                     f"acc: {accuracy:.2f}, s_l: {mean(sup_loss):.2f}, "
+                                     f"l: {losses[-1]:.2f}, p: {len(used_idx)}")
                 t = time.time()
 
-                accuracy, preds_t, sup_loss = evaluate(net, train_dataset, loss=loss, metric=metric)
+                accuracy, preds_t, sup_loss = evaluate(net, train_dataset,
+                                                       loss=loss, metric=metric)
                 preds_dropout = predict_dropout(net, train_dataset)
 
                 active_idx, active_loss = active_strategy.selection(preds_t, used_idx, n_points,
@@ -166,14 +182,15 @@ if __name__ == "__main__":
                 df["Used Idx"].append(used_idx.copy())
                 df["Predictions"].append(preds_t.cpu().numpy())
                 df["Accuracy"].append(accuracy)
-                df["Supervision Loss"].append(sup_loss.cpu().numpy())
+                df["Supervision Loss"].append(sup_loss)
                 df["Active Loss"].append(active_loss.cpu().numpy())
                 df["Time"].append((time.time() - t))
 
                 assert isinstance(used_idx, list), "Error"
 
                 if it != n_iterations:
-                    losses += train_loop(net, train_dataset, used_idx)
+                    losses += train_loop(net, train_dataset, used_idx, epochs,
+                                         lr=lr, loss=loss)
 
             if seed == 0:
                 sns.lineplot(data=losses)
@@ -194,12 +211,19 @@ if __name__ == "__main__":
     # %%
 
     dfs = pd.read_pickle(os.path.join(f"{result_folder}",
-                                     f"metrics_{n_points}_points_{now}.pkl"))
+                                      f"metrics_{n_points}_points_{now}.pkl"))
     dfs['Points'] = [len(used) for used in dfs['Used Idx']]
-    dfs = dfs.sort_values(['Strategy'])
-    dfs['Accuracy'] = [acc.item() if isinstance(acc, torch.Tensor) else acc
-                       for acc in dfs['Accuracy']]
+    dfs = dfs.sort_values(['Strategy', 'Seed', 'Iteration'])
+    # dfs['Accuracy'] = [acc.item() if isinstance(acc, torch.Tensor) else acc
+    #                    for acc in dfs['Accuracy']]
     dfs = dfs.reset_index()
+
+    dfs_auc = dfs.groupby("Strategy").mean()['Accuracy']
+    print(dfs_auc.to_latex())
+    with open(os.path.join(f"{result_folder}",
+                           f"auc_latex_{now}.txt")) as f:
+        f.write(dfs_auc.to_latex())
+
     # %%
 
     sns.set(style="whitegrid", font_scale=1.2,
@@ -217,6 +241,7 @@ if __name__ == "__main__":
                 dpi=200)
     plt.show()
 
+
     # %% md
 
     #### Create animation to visualize training
@@ -229,12 +254,14 @@ if __name__ == "__main__":
         df_strategy = dataframe[dataframe["Strategy"] == act_strategy].reset_index()
         df_iteration = df_strategy[df_strategy['Iteration'] == itr]
 
-        a_idx = df_iteration["Active Idx"]
+        a_idx = df_iteration["Active Idx"].item()
         u_idx = df_iteration["Used Idx"].item()
         new_idx = [1 if idx in a_idx else 0 for idx in u_idx]
 
         x_0, x_1 = x_t.cpu().numpy()[:, 0], x_t.cpu().numpy()[:, 1]
         preds = df_iteration["Predictions"].item()
+        if len(preds.shape) > 1:
+            preds = preds[:, 0]
 
         sns.scatterplot(x=x_0, y=x_1, hue=preds, legend=False)
         sns.scatterplot(x=x_0[np.asarray(u_idx)], y=x_1[np.asarray(u_idx)],
@@ -259,9 +286,10 @@ if __name__ == "__main__":
         iterations = [*range(1, 10)]
         for i in iterations:
             print(f"Iteration {i}/{len(iterations)} {strategy} strategy")
-
-            animate_points_and_prediction(i, strategy, dfs)
-            sns.despine(left=True, bottom=True)
-            plt.tight_layout()
-            plt.savefig(f"{image_folder}\\{strategy}_{i}.png")
-            plt.show()
+            png_file = os.path.join(f"{image_folder}", f"{strategy}_{i}.png")
+            if not os.path.exists(png_file):
+                animate_points_and_prediction(i, strategy, dfs)
+                sns.despine(left=True, bottom=True)
+                plt.tight_layout()
+                plt.savefig(png_file)
+                plt.show()

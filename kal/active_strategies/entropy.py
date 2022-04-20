@@ -1,6 +1,5 @@
 from typing import Tuple, List
 
-import numpy as np
 import torch
 
 from kal.active_strategies.strategy import Strategy
@@ -8,31 +7,33 @@ from kal.active_strategies.strategy import Strategy
 
 class EntropySampling(Strategy):
 
-    def loss(self, preds, *args, **kwargs) -> torch.Tensor:
+    def loss(self, preds: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         assert len(preds.shape) > 1, "Entropy Sampling requires multi-class prediction"
 
         log_probs = torch.log(preds)
-        uncertainties = (preds * log_probs).sum(1)
+        uncertainties = - (preds * log_probs).sum(1)
 
         return uncertainties
 
     def selection(self, preds: torch.Tensor, labelled_idx: list, n_p: int,
                   *args, **kwargs) -> Tuple[List, torch.Tensor]:
-        n_sample = preds.shape[0]
-        avail_idx = np.asarray(list(set(np.arange(n_sample)) - set(labelled_idx)))
-        avail_preds = preds[avail_idx]
 
-        e_loss = self.loss(avail_preds)
+        e_loss = self.loss(preds)
+
+        e_loss[torch.as_tensor(labelled_idx)] = -1
 
         e_idx = torch.argsort(e_loss, descending=True)
         e_idx = e_idx[:n_p].detach().cpu().numpy().tolist()
 
-        return e_idx[:n_p], e_loss
+        assert torch.as_tensor([idx not in labelled_idx for idx in e_idx]).all(), \
+            "Error: selected idx already labelled"
+
+        return e_idx, e_loss
 
 
 class EntropyDropoutSampling(EntropySampling):
 
-    def loss(self, _, *args, preds_dropout=None, **kwargs) -> torch.Tensor:
+    def loss(self, _, *args, preds_dropout: torch.Tensor = None, **kwargs) -> torch.Tensor:
         assert preds_dropout is not None, \
             "Need to pass predictions made with dropout to calculate this metric"
 
@@ -43,13 +44,14 @@ class EntropyDropoutSampling(EntropySampling):
         assert preds_dropout is not None, \
             "Need to pass predictions made with dropout to calculate this metric"
 
-        n_sample = preds.shape[0]
-        avail_idx = np.asarray(list(set(np.arange(n_sample)) - set(labelled_idx)))
-        avail_preds_dropout = preds_dropout[avail_idx]
+        e_loss = self.loss(preds, preds_dropout=preds_dropout)
 
-        e_loss = self.loss(preds, preds_dropout=avail_preds_dropout)
+        e_loss[torch.as_tensor(labelled_idx)] = -1
 
         e_idx = torch.argsort(e_loss, descending=True)
         e_idx = e_idx[:n_p].detach().cpu().numpy().tolist()
+
+        assert torch.as_tensor([idx not in labelled_idx for idx in e_idx]).all(), \
+            "Error: selected idx already labelled"
 
         return e_idx, e_loss

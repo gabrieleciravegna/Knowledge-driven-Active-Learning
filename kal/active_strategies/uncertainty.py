@@ -32,8 +32,7 @@ class UncertaintySampling(Strategy):
             u_loss = self.loss(preds)
 
         u_loss[torch.as_tensor(labelled_idx)] = -1
-        u_idx = torch.argsort(u_loss, descending=True)
-        u_idx = u_idx[:-len(labelled_idx)]
+        u_idx = torch.argsort(u_loss, descending=True).cpu().numpy().tolist()
 
         return list(u_idx[:n_p]), u_loss
 

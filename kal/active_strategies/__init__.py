@@ -44,21 +44,20 @@ ADV_DEEPFOOL = "Adv_DeepFool"
 ADV_BIM = "Adv_BIM"
 
 STRATEGIES = [
-    ADV_BIM,
-    ADV_DEEPFOOL,
+    KAL_U,
+    SUPERVISED,
+    BALD,
+    RANDOM,
     MARGIN,
     MARGIN_D,
     UNCERTAINTY,
     UNCERTAINTY_D,
-    KAL_U,
-    SUPERVISED,
-    KMEANS,
-    KCENTER,
     ENTROPY,
     ENTROPY_D,
-    BALD,
-
-    RANDOM,
+    KMEANS,
+    KCENTER,
+    ADV_BIM,
+    ADV_DEEPFOOL,
 ]
 
 SAMPLING_STRATEGIES: Dict[str, Callable[..., Strategy]] = {

@@ -1,7 +1,6 @@
 import math
 from typing import List, Tuple, Callable
 
-import numpy as np
 import torch
 
 from kal.active_strategies.strategy import Strategy
@@ -27,7 +26,6 @@ class KALSampling(Strategy):
     def selection(self, preds: torch.Tensor, labelled_idx: list, n_p: int,
                   *args, diversity=False, x=None, c_loss=None, arg_max=None,
                   **kwargs) -> Tuple[List, torch.Tensor]:
-
         """
         Constrained Active learning strategy.
         We take n elements which are the one that most violates the constraints
@@ -46,17 +44,12 @@ class KALSampling(Strategy):
                (c_loss is None and arg_max is None), \
                "Both c_loss and arg max has to be passed to the KAL selection"
 
-        n_sample = preds.shape[0]
-        avail_idx = np.asarray(list(set(np.arange(n_sample)) - set(labelled_idx)))
-        avail_preds = preds[avail_idx]
-        avail_x = x[avail_idx]
-
         if c_loss is None and arg_max is None:
-            c_loss, arg_max = self.loss(avail_preds, x=avail_x, return_argmax=True)
+            c_loss, arg_max = self.loss(preds, x=x, return_argmax=True)
 
-        c_loss = c_loss.clone().detach()
-        cal_idx = torch.argsort(c_loss, descending=True)
-        cal_idx = cal_idx[:-len(labelled_idx)]
+        c_loss[torch.as_tensor(labelled_idx)] = -1
+
+        cal_idx = torch.argsort(c_loss, descending=True).cpu().numpy().tolist()
 
         if diversity:
             # max number of samples per rule 1/2 of the total number of samples
@@ -83,7 +76,12 @@ class KALSampling(Strategy):
                                              "selection operation"
             return selected_idx, c_loss
 
-        return list(cal_idx[:n_p]), c_loss
+        selected_idx = cal_idx[:n_p]
+
+        assert torch.as_tensor([idx not in labelled_idx for idx in selected_idx]).all(), \
+            "Error: selected idx already labelled"
+
+        return selected_idx, c_loss
 
 
 class KALUncSampling(KALSampling):
@@ -104,11 +102,7 @@ class KALDropoutSampling(KALSampling):
                   diversity=False, x=None, **kwargs) -> Tuple[List, torch.Tensor]:
         assert preds_dropout is not None, "Need to pass predictions made with dropout to calculate this metric"
 
-        n_sample = preds.shape[0]
-        avail_idx = np.asarray(list(set(np.arange(n_sample)) - set(labelled_idx)))
-        avail_preds_dropout = preds_dropout[avail_idx]
-
-        c_loss, arg_max = self.loss(preds, preds_dropout=avail_preds_dropout, return_argmax=True, x=x)
+        c_loss, arg_max = self.loss(preds, preds_dropout=preds_dropout, return_argmax=True, x=x)
 
         return super().selection(preds_dropout, *args, c_loss=c_loss, arg_max=arg_max, **kwargs)
 

@@ -21,15 +21,16 @@ class MarginSampling(Strategy):
                   m_loss: torch.Tensor = None, **kwargs) \
             -> Tuple[List, torch.Tensor]:
 
-        n_sample = preds.shape[0]
-        avail_idx = np.asarray(list(set(np.arange(n_sample)) - set(labelled_idx)))
-        avail_preds = preds[avail_idx]
-
         if m_loss is None:
-            m_loss = self.loss(avail_preds, *args, **kwargs)
+            m_loss = self.loss(preds, *args, **kwargs)
+
+        m_loss[torch.as_tensor(labelled_idx)] = -1
 
         m_idx = torch.argsort(m_loss, descending=True)
         m_idx = m_idx[:n_p].detach().cpu().numpy().tolist()
+
+        assert torch.as_tensor([idx not in labelled_idx for idx in m_idx]).all(), \
+            "Error: selected idx already labelled"
 
         return m_idx, m_loss
 
