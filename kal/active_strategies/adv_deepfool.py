@@ -8,7 +8,7 @@ from kal.active_strategies.strategy import Strategy
 
 class AdversarialDeepFoolSampling(Strategy):
 
-    def __init__(self, *args, max_iter=50, k_sample=1000,
+    def __init__(self, *args, max_iter=20, k_sample=1000,
                  **kwargs):
         self.max_iter = max_iter
         self.k_sample = k_sample
@@ -23,6 +23,7 @@ class AdversarialDeepFoolSampling(Strategy):
         dis = torch.zeros(x.shape[0])
         dev = next(clf.parameters()).device
         for j in range(x.shape[0]):
+
             x_j = x[j]
             nx = torch.unsqueeze(x_j, 0).to(dev)
             nx.requires_grad_()
@@ -38,7 +39,7 @@ class AdversarialDeepFoolSampling(Strategy):
             while py == ny and i_iter < self.max_iter:
                 out[0, py].backward(retain_graph=True)
                 grad_np = nx.grad.data.clone()
-                value_l = np.inf
+                value_l = torch.inf
                 ri = None
 
                 for i in range(n_class):
@@ -51,10 +52,10 @@ class AdversarialDeepFoolSampling(Strategy):
 
                     wi = grad_i - grad_np
                     fi = out[0, i] - out[0, py]
-                    value_i = np.abs(fi.item()) / np.linalg.norm(wi.numpy().flatten())
+                    value_i = torch.abs(fi) / torch.norm(wi.flatten())
 
                     if value_i < value_l:
-                        ri = value_i / np.linalg.norm(wi.numpy().flatten()) * wi
+                        ri = value_i / torch.norm(wi.flatten()) * wi
 
                 eta += ri.clone() if ri is not None else 0.
                 nx.grad.data.zero_()

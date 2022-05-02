@@ -1,8 +1,13 @@
+from functools import partial
 from statistics import mean
 
-from sklearn.model_selection import StratifiedKFold
-from sklearn.neighbors import LocalOutlierFactor
+from sklearn import tree
+from sklearn.datasets import load_iris
+from sklearn.metrics import f1_score
+from sklearn.model_selection import train_test_split, StratifiedKFold
+from sklearn.preprocessing import MinMaxScaler, OneHotEncoder
 
+from kal.knowledge import IrisLoss
 from kal.utils import visualize_data_predictions, set_seed
 
 if __name__ == "__main__":
@@ -27,17 +32,16 @@ if __name__ == "__main__":
     import torch
     import tqdm
     from torch.utils.data import TensorDataset
-
     from kal.active_strategies import STRATEGIES, SAMPLING_STRATEGIES, ENTROPY_D, ENTROPY, ADV_DEEPFOOL, ADV_BIM, BALD, \
-    KAL_PLUS, KALS, UNCERTAINTY_D, MARGIN_D, DROPOUTS
-    from kal.knowledge.xor import XORLoss, steep_sigmoid
-    from kal.metrics import MultiLabelAccuracy, F1
+    SUPERVISED, KAL_U, KAL, RANDOM, UNCERTAINTY, KAL_D, KAL_DU, KALS, DROPOUTS
+    from kal.knowledge.xor import steep_sigmoid
+    from kal.metrics import F1
     from kal.network import MLP, train_loop, evaluate, predict_dropout, predict
 
     plt.rc('animation', html='jshtml')
     plt.close('all')
 
-    dataset_name = "xor"
+    dataset_name = "iris"
     model_folder = os.path.join("models", dataset_name)
     result_folder = os.path.join("results", dataset_name)
     image_folder = os.path.join("images", dataset_name)
@@ -48,77 +52,104 @@ if __name__ == "__main__":
     if not os.path.isdir(image_folder):
         os.makedirs(image_folder)
 
-    set_seed(0)
-
     sns.set_theme(style="whitegrid", font="Times New Roman")
     now = str(datetime.datetime.now()).replace(":", ".")
     dev = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
     print(f"Working on {dev}")
 
-    KLoss = XORLoss
-    strategies = STRATEGIES
-    # strategies = KALS
-
     # %% md
-    #### Generating and visualizing data for the xor problem
+
+    #### Loading data for the IRIS dataset
+
     # %%
 
-    load = False
-    tot_points = 100000
-    first_points = 10
+    iris_dataset = load_iris()
+    X = iris_dataset.data
+    Y = iris_dataset.target
+    feat_names = iris_dataset.feature_names
+    class_names = iris_dataset.target_names
+    print("Class names", class_names, "Feat names", feat_names)
+
+    # %%
+
+    x = MinMaxScaler().fit_transform(X)
+    y = OneHotEncoder(sparse=False).fit_transform(Y.reshape(-1, 1))
+    clf = tree.DecisionTreeClassifier(max_depth=2, random_state=1234)
+    x_train, x_test, y_train, y_test = train_test_split(x, y, random_state=1234)
+    model = clf.fit(x_train, y_train)
+    y_pred = model.predict(x_test)
+    print("Tree Accuracy:", f1_score(y_test, y_pred, average="macro") * 100)
+    text_representation = tree.export_text(model, feature_names=feat_names)
+    print(text_representation)
+
+    # %%
+
+    x_t = torch.FloatTensor(x)
+    y_t = torch.FloatTensor(y)
+    dataset = TensorDataset(x_t, y_t)
+
+    tot_points = x.shape[0]
+    input_size = x.shape[1]
+    n_classes = y.shape[1]
+
+    first_points = 5
     n_points = 5
-    n_iterations = (400 - first_points) // n_points
-    input_size = 2
-    hidden_size = 200
-    seeds = 10
-    lr = 1e-3
-    epochs = 200
+    n_iterations = (75 - first_points) // n_points
+    seeds = 10  #
+    lr = 3 * 1e-3
+    epochs = 100
+    hidden_size = 100
+    load = False
 
-    x_t = torch.rand(tot_points, input_size).to(dev)
-    y_t = (((x_t[:, 0] > 0.5) & (x_t[:, 1] < 0.5)) |
-           ((x_t[:, 1] > 0.5) & (x_t[:, 0] < 0.5))
-           ).float().to(dev)
-    y_multi_t = torch.stack((y_t, 1 - y_t), dim=1)
+    KLoss = partial(IrisLoss, names=class_names)
+    strategies = STRATEGIES
+    # strategies = DROPOUTS
+    print("Strategies:", strategies)
+    print("n_points", n_points, "n_iterations", n_iterations)
 
-    # sns.scatterplot(x=x_t[:, 0].numpy(), y=x_t[:, 1].numpy(), hue=y_t.numpy())
-    # plt.savefig(f"{image_folder}\\data_labelling.png")
-    # plt.show()
+    #%% md
+
+    #### Visualizing iris data
+
+    #%%
+
+    sns.scatterplot(x=x[:, 2], y=x[:, 3], hue=Y)
+    plt.savefig(f"{image_folder}\\data_labelling.png")
+    plt.show()
 
     # %% md
     #### Defining constraints as product t-norm of the FOL rule expressing the XOR
     # %%
-    # preds = MLP(1, 2, 100)(x_t).detach().squeeze()
-    #
-    # k_loss = KLoss()(y_t, x=x_t)
-    # sns.scatterplot(x=x_t[:, 0].numpy(), y=x_t[:, 1].numpy(), hue=k_loss.numpy())
-    # plt.show()
-    #
-    # k_loss = KLoss(uncertainty=True)(preds, x=x_t)
-    # sns.scatterplot(x=x_t[:, 0].numpy(), y=x_t[:, 1].numpy(), hue=k_loss.numpy())
-    # plt.show()
-    #
-    # s_loss = torch.nn.BCELoss(reduction="none")(preds, y_t)
-    # sns.scatterplot(x=x_t[:, 0].numpy(), y=x_t[:, 1].numpy(), hue=s_loss.numpy())
-    # plt.show()
+    k_loss = KLoss()(y_t, x=x_t)
+    sns.scatterplot(x=x_t[:, 2].numpy(), y=x_t[:, 3].numpy(), hue=k_loss.numpy())
+    plt.show()
 
     # %%md
     #### Calculating the prediction of the rule
     # %%
 
-    discrete_x = steep_sigmoid(x_t, k=10).float()
-    x1 = discrete_x[:, 0]
-    x2 = discrete_x[:, 1]
-    pred_rule = (x1 * (1 - x2)) + (x2 * (1 - x1))
-    print("Rule Accuracy:",
-          (pred_rule > 0.5).eq(y_t).sum().item() / y_t.shape[0] * 100)
-    # sns.scatterplot(x=x_t[:, 0].numpy(), y=x_t[:, 1].numpy(), hue=pred_rule)
-    # plt.show()
+    def calculate_rule_prediction(x_continue: torch.Tensor) -> torch.Tensor:
+        petal_length = steep_sigmoid(x_continue[:, 2], k=100, b=0.3).float()
+        petal_width = steep_sigmoid(x_continue[:, 3], k=100, b=0.6).float()
+        f1 = 1 - petal_length
+        f2 = petal_length * (1 - petal_width)
+        f3 = petal_length * petal_width
+        f = torch.stack((f1, f2, f3), dim=1)
+        f = torch.softmax(f, dim=1)
+        return f
+
+    pred_rule = calculate_rule_prediction(x_t)
+    print("Rule Accuracy:", f1_score(y_t, pred_rule > 0.5, average="macro") * 100)
+    sns.scatterplot(x=x_t[:, 2].numpy(), y=x_t[:, 3].numpy(), hue=pred_rule.argmax(dim=1),
+                    style=y_t.argmax(dim=1) == pred_rule.argmax(dim=1))
+    plt.show()
+
 
     #### Active Learning Strategy Comparison
     dfs = []
     skf = StratifiedKFold(n_splits=seeds)
 
-    for seed, (train_idx, test_idx) in enumerate(skf.split(x_t, y_t)):
+    for seed, (train_idx, test_idx) in enumerate(skf.split(x_t, y_t.argmax(dim=1))):
         train_sample = len(train_idx)
         set_seed(seed)
         first_idx = np.random.choice(train_sample, first_points, replace=False).tolist()
@@ -150,23 +181,13 @@ if __name__ == "__main__":
                 "Test Idx": []
             }
 
-            if strategy in [ADV_DEEPFOOL, ADV_BIM, ENTROPY, ENTROPY_D, BALD]:
-                num_classes = 2
-                loss = torch.nn.CrossEntropyLoss(reduction="none")
-                x_train, y_train = x_t[train_idx], y_multi_t[train_idx]
-                x_test, y_test = x_t[test_idx], y_multi_t[test_idx]
-
-            else:
-                num_classes = 1
-                x_train, y_train = x_t[train_idx], y_t[train_idx]
-                x_test, y_test = x_t[test_idx], y_t[test_idx]
-                loss = torch.nn.BCEWithLogitsLoss(reduction="none")
-
             if strategy in DROPOUTS:
                 dropout = True
             else:
                 dropout = False
 
+            x_train, y_train = x_t[train_idx], y_t[train_idx]
+            x_test, y_test = x_t[test_idx], y_t[test_idx]
             train_dataset = TensorDataset(x_train, y_train)
             test_dataset = TensorDataset(x_test, y_test)
             loss = torch.nn.BCEWithLogitsLoss(reduction="none")
@@ -174,7 +195,7 @@ if __name__ == "__main__":
 
             set_seed(0)
             net = MLP(input_size=input_size, hidden_size=hidden_size,
-                      n_classes=num_classes, dropout=dropout).to(dev)
+                      n_classes=n_classes, dropout=dropout).to(dev)
 
             # first training with few randomly selected data
             used_idx = first_idx.copy()
@@ -184,8 +205,7 @@ if __name__ == "__main__":
 
             for it in (pbar := tqdm.trange(1, n_iterations + 1)):
                 pbar.set_description(f"{strategy} {seed + 1}/{seeds}, "
-                                     f"acc: {np.mean([0] + df['Accuracy']):.2f}, "
-                                     f"s_l: {mean(sup_loss):.2f}, "
+                                     f"acc: {np.mean([0] + df['Accuracy']):.2f}, s_l: {mean(sup_loss):.2f}, "
                                      f"l: {losses[-1]:.2f}, p: {len(used_idx)}")
                 t = time.time()
 
@@ -197,9 +217,8 @@ if __name__ == "__main__":
 
                 test_accuracy, sup_loss = evaluate(net, test_dataset, metric=metric, loss=loss)
 
-                active_idx, active_loss = active_strategy.selection(preds_t, used_idx,
-                                                                    n_points, x=x_t[train_idx],
-                                                                    labels=y_t[train_idx],
+                active_idx, active_loss = active_strategy.selection(preds_t, used_idx, n_points,
+                                                                    x=x_t[train_idx], labels=y_t[train_idx],
                                                                     preds_dropout=preds_dropout,
                                                                     clf=net, dataset=train_dataset)
                 used_idx += active_idx
@@ -224,8 +243,7 @@ if __name__ == "__main__":
                                          lr=lr, loss=loss)
                 else:
                     pbar.set_description(f"{strategy} {seed + 1}/{seeds}, "
-                                         f"acc: {np.mean([0] + df['Accuracy']):.2f}, "
-                                         f"s_l: {mean(sup_loss):.2f}, "
+                                         f"acc: {test_accuracy:.2f}, s_l: {mean(sup_loss):.2f}, "
                                          f"l: {losses[-1]:.2f}, p: {len(used_idx)}")
 
             if seed == 0:
@@ -307,5 +325,5 @@ if __name__ == "__main__":
     #         print(f"Iteration {i}/{len(iterations)} {strategy} strategy")
     #         png_file = os.path.join(f"{image_folder}", f"{strategy}_{i}.png")
     #         # if not os.path.exists(png_file):
-    #         visualize_data_predictions(x_t, i, strategy, dfs, png_file)
-    #
+    #         visualize_data_predictions(x_t, i, strategy, dfs, png_file, dimensions=[2, 3])
+

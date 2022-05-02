@@ -18,7 +18,7 @@ class IrisLoss(KnowledgeLoss):
         self.mu = mu
         self.uncertainty = uncertainty
 
-    def __call__(self, output: torch.Tensor, return_argmax=False, x: torch.Tensor = None) \
+    def __call__(self, output: torch.Tensor, x: torch.Tensor = None, return_argmax=False, return_losses=False) \
             -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
 
         # ~petal_length <=> f1
@@ -89,15 +89,35 @@ class IrisLoss(KnowledgeLoss):
                              self.mu * c_loss_unc2,
                              self.mu * c_loss_unc3])
 
-        c_losses = torch.stack(c_losses, dim=1)
+        losses = torch.stack(c_losses, dim=1)
+        arg_max = torch.argmax(losses, dim=1)
 
-        loss_sum = c_losses.sum(dim=1)
+        loss_sum = losses.sum(dim=1)
 
-        threshold = 1.
-        self.check_loss(output, c_losses, loss_sum, threshold)
+        threshold = 10.
+        self.check_loss(output, losses.T, loss_sum, threshold)
+
+        if return_losses:
+            if return_argmax:
+                return losses, arg_max
+            return losses
 
         if return_argmax:
-            most_violated_rules = c_losses.argmax(dim=1)
-            return loss_sum, most_violated_rules
+            return loss_sum, arg_max
 
         return loss_sum
+
+    # losses = torch.stack(loss_fol_product_tnorm, dim=0)
+    #
+    # losses = torch.sum(losses, dim=1)
+    #
+    # loss_sum = torch.squeeze(torch.sum(losses, dim=0))
+    #
+    # threshold = 0.5 if targets else 10.
+    # self.check_loss(output, losses, loss_sum, threshold)
+    #
+    # if return_arg_max:
+    #     arg_max = torch.argmax(losses, dim=0)
+    #     return loss_sum, arg_max
+    #
+    # return loss_sum

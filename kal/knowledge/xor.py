@@ -38,7 +38,8 @@ class XORLoss(KnowledgeLoss):
     # => (1 - ((1 - term1) * (1 - term2)) * (1 - f)                (replacing again terms with (1 - term1) * (1 - term2)
     # => 1 - ((1 - (x1 * (1 - x2)) * (1 - (x2 * (1 - x1)) * (1 - f)
 
-    def __call__(self, output: torch.Tensor, return_argmax=False, x: torch.Tensor = None) \
+    def __call__(self, output: torch.Tensor, x: torch.Tensor = None, return_argmax=False,
+                 return_losses=False) \
             -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
         assert x is not None, "Need to pass input data to compute the violation loss"
 
@@ -54,14 +55,20 @@ class XORLoss(KnowledgeLoss):
         else:
             c_losses = [cons_loss1, cons_loss2]
 
-        c_losses = torch.stack(c_losses, dim=1)
-        loss_sum = c_losses.sum(dim=1)
+        losses = torch.stack(c_losses, dim=1)
+        arg_max = torch.argmax(losses, dim=1)
+
+        loss_sum = losses.sum(dim=1)
 
         threshold = 1.
-        self.check_loss(output, c_losses, loss_sum, threshold)
+        self.check_loss(output, losses, loss_sum, threshold)
+
+        if return_losses:
+            if return_argmax:
+                return losses, arg_max
+            return losses
 
         if return_argmax:
-            most_violated_rules = c_losses.argmax(dim=1)
-            return loss_sum, most_violated_rules
+            return loss_sum, arg_max
 
         return loss_sum

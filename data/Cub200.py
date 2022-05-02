@@ -150,17 +150,18 @@ class CUBDataset(Dataset):
                              [:, main_classes:], axis=0)
             self.class_attr_comb.append(comb)
         self.class_attr_comb = np.asarray(self.class_attr_comb).squeeze()
-
-        # Load class names
-        with open(os.path.join(root, class_name_file), "r") as f:
-            self.class_names = [name for name in f.readlines() if name != "\n"]
+        self.imgs = {i: None for i in range(len(self))}
 
     def __getitem__(self, index: int) -> [torch.Tensor, torch.Tensor]:
         # Load the image
         img_index = f"{index+1:05d}"
         img_path = os.path.join(self.root, image_folder, img_index) + ".jpg"
-        img = Image.open(img_path).convert('RGB')
-        img = self.transforms(img)
+        if self.imgs[index] is None:
+            img = Image.open(img_path).convert('RGB')
+            img = self.transforms(img)
+            self.imgs[index] = img
+        else:
+            img = self.imgs[index]
 
         # Load the label
         label = self.targets[index]

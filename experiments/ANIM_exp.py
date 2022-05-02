@@ -1,46 +1,59 @@
-from statistics import mean
-
-from sklearn.model_selection import StratifiedKFold
-from sklearn.neighbors import LocalOutlierFactor
-
-from kal.utils import visualize_data_predictions, set_seed
+import tqdm
 
 if __name__ == "__main__":
+    #%% md
 
-    # %% md
+    # Constrained Active Learning - Experiment on the ANIMALS problem
 
-    # Knowledge-Driven Active Learning - Experiment on the XOR problem
+    #%% md
 
-    # %% md
+    #### Importing libraries
+
+    #%%
+
+    #%matplotlib inline
+    #%autosave 10
     import os
+    os.environ["CUDA_VISIBLE_DEVICES"] = ""
+    os.environ["PYTHONPYCACHEPREFIX"] = os.path.join("..", "__pycache__")
 
-    os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
-
-    import datetime
+    import shutil
     import random
+    import datetime
     import time
+    from functools import partial
+    from statistics import mean
 
+    import torchvision
     import matplotlib.pyplot as plt
     import numpy as np
     import pandas as pd
     import seaborn as sns
     import torch
-    import tqdm
-    from torch.utils.data import TensorDataset
+    from torch.utils.data import DataLoader, TensorDataset
+    from torchvision.transforms import transforms
+    from tqdm import trange
+    from sklearn.model_selection import StratifiedKFold
+    from sklearn.neighbors import LocalOutlierFactor
 
-    from kal.active_strategies import STRATEGIES, SAMPLING_STRATEGIES, ENTROPY_D, ENTROPY, ADV_DEEPFOOL, ADV_BIM, BALD, \
-    KAL_PLUS, KALS, UNCERTAINTY_D, MARGIN_D, DROPOUTS
-    from kal.knowledge.xor import XORLoss, steep_sigmoid
-    from kal.metrics import MultiLabelAccuracy, F1
-    from kal.network import MLP, train_loop, evaluate, predict_dropout, predict
+    from kal.active_strategies import STRATEGIES, SAMPLING_STRATEGIES, ADV_DEEPFOOL, ADV_BIM, ENTROPY, ENTROPY_D, BALD, \
+    KALS, MARGIN, MARGIN_D, DROPOUTS, KAL_PLUS_DROP_DU
+    from kal.network import MLP, train_loop, evaluate, predict, predict_dropout
+    from kal.utils import visualize_active_vs_sup_loss, set_seed
+
+    from data.Animals import CLASS_1_HOTS, classes
+    from kal.metrics import F1
+    from kal.knowledge import AnimalLoss
 
     plt.rc('animation', html='jshtml')
-    plt.close('all')
 
-    dataset_name = "xor"
-    model_folder = os.path.join("models", dataset_name)
-    result_folder = os.path.join("results", dataset_name)
-    image_folder = os.path.join("images", dataset_name)
+    dataset = "animals"
+    model_folder = os.path.join("models", dataset)
+    result_folder = os.path.join("results", dataset)
+    image_folder = os.path.join("images", dataset)
+    data_folder = os.path.join("..", "data", "Animals")
+    assert os.path.isdir(data_folder), "Data not available in the required folder"
+
     if not os.path.isdir(model_folder):
         os.makedirs(model_folder)
     if not os.path.isdir(result_folder):
@@ -49,76 +62,90 @@ if __name__ == "__main__":
         os.makedirs(image_folder)
 
     set_seed(0)
-
     sns.set_theme(style="whitegrid", font="Times New Roman")
     now = str(datetime.datetime.now()).replace(":", ".")
     dev = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
     print(f"Working on {dev}")
+    KLoss = partial(AnimalLoss, names=classes)
 
-    KLoss = XORLoss
-    strategies = STRATEGIES
-    # strategies = KALS
-
-    # %% md
-    #### Generating and visualizing data for the xor problem
-    # %%
-
-    load = False
-    tot_points = 100000
-    first_points = 10
-    n_points = 5
-    n_iterations = (400 - first_points) // n_points
-    input_size = 2
-    hidden_size = 200
+    #%%
+    first_points = 100
+    n_points = 100
+    n_iterations = 49
     seeds = 10
+    hidden_size = 100
     lr = 1e-3
     epochs = 200
+    main_classes = 7
+    metric = F1()
+    load = False
 
-    x_t = torch.rand(tot_points, input_size).to(dev)
-    y_t = (((x_t[:, 0] > 0.5) & (x_t[:, 1] < 0.5)) |
-           ((x_t[:, 1] > 0.5) & (x_t[:, 0] < 0.5))
-           ).float().to(dev)
-    y_multi_t = torch.stack((y_t, 1 - y_t), dim=1)
+    strategies = STRATEGIES
+    # strategies = [ENTROPY_D, ENTROPY, MARGIN_D, MARGIN, ]
+    # strategies = KALS[::-1]
+    # strategies = [KAL_PLUS_DROP_DU]
+    print("Strategies:", strategies)
+    print("n_points", n_points, "n_iterations", n_iterations)
 
-    # sns.scatterplot(x=x_t[:, 0].numpy(), y=x_t[:, 1].numpy(), hue=y_t.numpy())
-    # plt.savefig(f"{image_folder}\\data_labelling.png")
-    # plt.show()
+    #%% md
 
-    # %% md
-    #### Defining constraints as product t-norm of the FOL rule expressing the XOR
-    # %%
-    # preds = MLP(1, 2, 100)(x_t).detach().squeeze()
-    #
-    # k_loss = KLoss()(y_t, x=x_t)
-    # sns.scatterplot(x=x_t[:, 0].numpy(), y=x_t[:, 1].numpy(), hue=k_loss.numpy())
-    # plt.show()
-    #
-    # k_loss = KLoss(uncertainty=True)(preds, x=x_t)
-    # sns.scatterplot(x=x_t[:, 0].numpy(), y=x_t[:, 1].numpy(), hue=k_loss.numpy())
-    # plt.show()
-    #
-    # s_loss = torch.nn.BCELoss(reduction="none")(preds, y_t)
-    # sns.scatterplot(x=x_t[:, 0].numpy(), y=x_t[:, 1].numpy(), hue=s_loss.numpy())
-    # plt.show()
+    #### Loading data for the animal's problem.
+    # Data pass through a RESNET 50 first which extract the data features
 
-    # %%md
-    #### Calculating the prediction of the rule
-    # %%
+    #%%
+    feature_file = "../data/Animals/ResNet50-TL-feats.pth"
+    transform = transforms.Compose([
+        transforms.Resize(256),
+        transforms.CenterCrop(224),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+    ])
+    annoying_dir = os.path.join(data_folder, "__pycache__")
+    if os.path.isdir(annoying_dir):
+        shutil.rmtree(annoying_dir)
+    dataset = torchvision.datasets.ImageFolder(data_folder, transform=transform)
+    feature_extractor = torchvision.models.resnet50(pretrained=True)
+    feature_extractor.fc = torch.nn.Identity()
+    data_loader = DataLoader(dataset, batch_size=128, num_workers=8)
+    tot_points = len(dataset)
+    class_names = classes
+    n_classes = len(class_names)
 
-    discrete_x = steep_sigmoid(x_t, k=10).float()
-    x1 = discrete_x[:, 0]
-    x2 = discrete_x[:, 1]
-    pred_rule = (x1 * (1 - x2)) + (x2 * (1 - x1))
-    print("Rule Accuracy:",
-          (pred_rule > 0.5).eq(y_t).sum().item() / y_t.shape[0] * 100)
-    # sns.scatterplot(x=x_t[:, 0].numpy(), y=x_t[:, 1].numpy(), hue=pred_rule)
-    # plt.show()
+    if os.path.isfile(feature_file):
+        x = torch.load(feature_file)
+        y = dataset.targets
+        y_multi = [CLASS_1_HOTS[dataset.classes[t]] for t in dataset.targets]
+        print("Features loaded")
+    else:
+        x, y = [], []
+        with torch.no_grad():
+            feature_extractor.eval(), feature_extractor.to(dev)
+            for i, (batch_data, batch_labels) in enumerate(data_loader):
+                print(f"{i}/{len(data_loader)} it, time: {datetime.datetime.now()}")
+                batch_x = feature_extractor(batch_data.to(dev))
+                x.append(batch_x)
+                y.append(batch_labels)
+            x = torch.cat(x)
+            y = torch.cat(y)
+            y_multi = [CLASS_1_HOTS[dataset.classes[t]] for t in dataset.targets]
+            torch.save(x, feature_file)
+    input_size = x.shape[1]
 
+    #%%
+    #### Visualizing and checking knowledge loss on the labels
+
+    x_t = torch.as_tensor(x, dtype=torch.float).to(dev)
+    y_t = torch.as_tensor(y_multi, dtype=torch.float).to(dev)
+    cons_loss = KLoss()(y_t).sort()[0].cpu().numpy()
+    sns.scatterplot(x=[*range(len(cons_loss))], y=cons_loss)
+    plt.show()
+    
+    #%%
     #### Active Learning Strategy Comparison
     dfs = []
     skf = StratifiedKFold(n_splits=seeds)
 
-    for seed, (train_idx, test_idx) in enumerate(skf.split(x_t, y_t)):
+    for seed, (train_idx, test_idx) in enumerate(skf.split(x_t.cpu(), y_t.argmax(dim=1).cpu())):
         train_sample = len(train_idx)
         set_seed(seed)
         first_idx = np.random.choice(train_sample, first_points, replace=False).tolist()
@@ -150,23 +177,13 @@ if __name__ == "__main__":
                 "Test Idx": []
             }
 
-            if strategy in [ADV_DEEPFOOL, ADV_BIM, ENTROPY, ENTROPY_D, BALD]:
-                num_classes = 2
-                loss = torch.nn.CrossEntropyLoss(reduction="none")
-                x_train, y_train = x_t[train_idx], y_multi_t[train_idx]
-                x_test, y_test = x_t[test_idx], y_multi_t[test_idx]
-
-            else:
-                num_classes = 1
-                x_train, y_train = x_t[train_idx], y_t[train_idx]
-                x_test, y_test = x_t[test_idx], y_t[test_idx]
-                loss = torch.nn.BCEWithLogitsLoss(reduction="none")
-
             if strategy in DROPOUTS:
                 dropout = True
             else:
                 dropout = False
 
+            x_train, y_train = x_t[train_idx], y_t[train_idx]
+            x_test, y_test = x_t[test_idx], y_t[test_idx]
             train_dataset = TensorDataset(x_train, y_train)
             test_dataset = TensorDataset(x_test, y_test)
             loss = torch.nn.BCEWithLogitsLoss(reduction="none")
@@ -174,7 +191,7 @@ if __name__ == "__main__":
 
             set_seed(0)
             net = MLP(input_size=input_size, hidden_size=hidden_size,
-                      n_classes=num_classes, dropout=dropout).to(dev)
+                      n_classes=n_classes, dropout=dropout).to(dev)
 
             # first training with few randomly selected data
             used_idx = first_idx.copy()
@@ -184,24 +201,23 @@ if __name__ == "__main__":
 
             for it in (pbar := tqdm.trange(1, n_iterations + 1)):
                 pbar.set_description(f"{strategy} {seed + 1}/{seeds}, "
-                                     f"acc: {np.mean([0] + df['Accuracy']):.2f}, "
-                                     f"s_l: {mean(sup_loss):.2f}, "
+                                     f"acc: {np.mean([0] + df['Accuracy']):.2f}, s_l: {mean(sup_loss):.2f}, "
                                      f"l: {losses[-1]:.2f}, p: {len(used_idx)}")
                 t = time.time()
 
                 preds_t = predict(net, train_dataset)
                 preds_dropout = predict_dropout(net, train_dataset)
 
-                assert not dropout or (preds_dropout - preds_t).abs().sum() > .1, \
+                assert not dropout or (preds_dropout - preds_t).abs().sum() > .01, \
                     "Error in computing dropout predictions"
 
                 test_accuracy, sup_loss = evaluate(net, test_dataset, metric=metric, loss=loss)
 
-                active_idx, active_loss = active_strategy.selection(preds_t, used_idx,
-                                                                    n_points, x=x_t[train_idx],
-                                                                    labels=y_t[train_idx],
+                active_idx, active_loss = active_strategy.selection(preds_t, used_idx, n_points,
+                                                                    x=x_t[train_idx], labels=y_t[train_idx].cpu(),
                                                                     preds_dropout=preds_dropout,
-                                                                    clf=net, dataset=train_dataset)
+                                                                    clf=net, dataset=train_dataset,
+                                                                    main_classes=range(main_classes))
                 used_idx += active_idx
 
                 df["Strategy"].append(strategy)
@@ -224,7 +240,7 @@ if __name__ == "__main__":
                                          lr=lr, loss=loss)
                 else:
                     pbar.set_description(f"{strategy} {seed + 1}/{seeds}, "
-                                         f"acc: {np.mean([0] + df['Accuracy']):.2f}, "
+                                         f"{np.mean([0] + df['Accuracy']):.2f}, "
                                          f"s_l: {mean(sup_loss):.2f}, "
                                          f"l: {losses[-1]:.2f}, p: {len(used_idx)}")
 
@@ -273,7 +289,7 @@ if __name__ == "__main__":
         f.write(dfs_time.to_latex())
 
 
-    # %%
+    #%%
 
     sns.set(style="whitegrid", font_scale=1.5,
             rc={'figure.figsize': (10, 8)})
@@ -289,23 +305,24 @@ if __name__ == "__main__":
     plt.legend(title='Strategy', loc='lower right', labels=sorted(strategies))
     plt.savefig(f"{image_folder}\\Accuracy_{n_points}_points_{now}.png",
                 dpi=200)
+
     plt.show()
 
 
-    # %% md
+    #%% md
 
-    #### Displaying some pictures to visualize training
+    #### Displaying some pictures from the animations
 
     # %%
 
-    # sns.set(style="ticks", font="Times New Roman", font_scale=1.3,
-    #         rc={'figure.figsize': (6, 5)})
-    # for strategy in strategies:
-    #     # iterations = [10] if strategy != SUPERVISED else [15]
-    #     iterations = [*range(1, 10)]
-    #     for i in iterations:
-    #         print(f"Iteration {i}/{len(iterations)} {strategy} strategy")
-    #         png_file = os.path.join(f"{image_folder}", f"{strategy}_{i}.png")
-    #         # if not os.path.exists(png_file):
-    #         visualize_data_predictions(x_t, i, strategy, dfs, png_file)
-    #
+    sns.set(style="ticks", font="Times New Roman", font_scale=1.3,
+            rc={'figure.figsize': (6, 5)})
+    for strategy in strategies:
+        # iterations = [10] if strategy != SUPERVISED else [15]
+        iterations = [*range(1, 10)]
+        for i in iterations:
+            print(f"Iteration {i}/{len(iterations)} {strategy} strategy")
+            png_file = os.path.join(f"{image_folder}", f"{strategy}_{i}.png")
+            # if not os.path.exists(png_file):
+            visualize_active_vs_sup_loss(x_t, i, strategy, dfs, png_file, )
+

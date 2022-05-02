@@ -11,7 +11,7 @@ class AnimalLoss(KnowledgeLoss):
         self.mu = mu
         self.uncertainty = uncertainty
 
-    def __call__(self, output, targets=False, return_arg_max=False) \
+    def __call__(self, output, targets=False, return_argmax=False, return_losses=False) \
             -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
 
         # MAIN CLASSES
@@ -116,17 +116,22 @@ class AnimalLoss(KnowledgeLoss):
                 unc_loss += output[:, i] * (1 - output[:, i])
             loss_fol_product_tnorm.append(unc_loss)
 
-        losses = torch.stack(loss_fol_product_tnorm, dim=0)
+        losses = torch.stack(loss_fol_product_tnorm, dim=1)
+        arg_max = torch.argmax(losses, dim=1)
 
-        losses = torch.sum(losses, dim=1)
+        # losses = torch.sum(losses, dim=1)
 
-        loss_sum = torch.squeeze(torch.sum(losses, dim=0))
+        loss_sum = torch.squeeze(torch.sum(losses, dim=1))
 
         threshold = 0.5 if targets else 10.
-        self.check_loss(output, losses, loss_sum, threshold)
+        self.check_loss(output, losses.T, loss_sum, threshold)
 
-        if return_arg_max:
-            arg_max = torch.argmax(losses, dim=0)
+        if return_losses:
+            if return_argmax:
+                return losses, arg_max
+            return losses
+
+        if return_argmax:
             return loss_sum, arg_max
 
         return loss_sum

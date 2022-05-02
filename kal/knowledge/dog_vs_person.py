@@ -121,7 +121,7 @@ class DogvsPersonLoss(KnowledgeLoss):
                 (1 - Person_torso)
         )])
 
-        losses = torch.stack(loss_fol_product_tnorm, dim=0)
+        losses = torch.stack(loss_fol_product_tnorm, dim=1)
 
         if self.scale:
             if self.scale == "a" or self.scale == "both":
@@ -135,12 +135,12 @@ class DogvsPersonLoss(KnowledgeLoss):
                 # scale by a factor 10 the penultimate rule (which is the most important)
                 losses[-2] = losses[-2] * self.mu
 
-        losses = torch.sum(losses, dim=1)
+        # losses = torch.sum(losses, dim=1)
 
-        loss_sum = torch.squeeze(torch.sum(losses, dim=0))
+        loss_sum = torch.squeeze(torch.sum(losses, dim=1))
 
         threshold = 0.5 if targets else 10.
-        self.check_loss(loss_sum, losses, loss_sum, threshold)
+        self.check_loss(loss_sum, losses.T, loss_sum, threshold)
 
         # print("Output", output)
         # print("Losses", losses)

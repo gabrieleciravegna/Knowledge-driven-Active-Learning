@@ -7,11 +7,12 @@ import torch
 class KnowledgeLoss:
 
     def __init__(self, names=None):
-        if not isinstance(names, np.ndarray):
-            names = np.asarray(names)
+        if names is not None:
+            if not isinstance(names, np.ndarray):
+                names = np.asarray(names)
         self.names = names
 
-    def __call__(self, preds: torch.Tensor, return_argmax=False, **kwargs) \
+    def __call__(self, preds: torch.Tensor, return_argmax=False, return_losses=False, **kwargs) \
             -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
         raise NotImplementedError()
 

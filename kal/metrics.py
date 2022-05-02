@@ -42,5 +42,5 @@ class F1(Metric):
 		if labels.dtype == torch.float:
 			labels = labels > 0.5
 		f1_value = f1_score(predictions.cpu().numpy(), labels.cpu().numpy(),
-							average='macro') * 100
+							average='macro', zero_division=0) * 100
 		return f1_value
