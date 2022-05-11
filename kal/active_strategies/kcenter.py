@@ -40,13 +40,22 @@ class KCenterSampling(Strategy):
                               "in KMeans Sampling selection method"
 
         n_sample = preds.shape[0]
+        k_sample = np.min([self.k_sample, n_sample])
 
-        labelled_idx_bool = np.zeros(n_sample, dtype=bool)
-        labelled_idx_bool[labelled_idx] = True
-        # x = x.detach().cpu().numpy()
+        rand_idx = torch.randperm(n_sample).numpy()[:k_sample]
+        for idx in labelled_idx:
+            if idx not in rand_idx:
+                rand_idx = np.append(rand_idx, idx)
+        rand_labelled_idx = np.asarray([np.argwhere(rand_idx == idx)[0][0] for idx in labelled_idx])
+        k_sample = rand_idx.shape[0]
 
-        dist_mat = torch.matmul(x.cpu(), x.T.cpu())
-        sq = torch.diagonal(dist_mat).reshape(n_sample, 1).clone()
+        rand_x = x[rand_idx]
+
+        labelled_idx_bool = np.zeros(k_sample, dtype=bool)
+        labelled_idx_bool[rand_labelled_idx] = True
+
+        dist_mat = torch.matmul(rand_x.cpu(), rand_x.T.cpu())
+        sq = torch.diagonal(dist_mat).reshape(k_sample, 1).clone()
         dist_mat *= -2
         dist_mat += sq
         dist_mat += sq.T
@@ -55,18 +64,20 @@ class KCenterSampling(Strategy):
         mat = dist_mat[~labelled_idx_bool, :][:, labelled_idx_bool]
 
         for _ in range(n_p):
-            mat_min = mat.min(axis=1)[0]
+            mat_min = mat.min(dim=1)[0]
             i_center = mat_min.argmax()
-            i_center_idx = np.arange(n_sample)[~labelled_idx_bool][i_center]
+            i_center_idx = np.arange(k_sample)[~labelled_idx_bool][i_center]
             labelled_idx_bool[i_center_idx] = True
             mat = delete(mat, i_center, 0)
             mat = torch.cat((mat, dist_mat[~labelled_idx_bool, i_center_idx][:, None]), dim=1)
 
-        selected_idx = [idx for idx in np.where(labelled_idx_bool)[0] if idx not in labelled_idx]
+        selected_idx = [idx for idx in np.where(labelled_idx_bool)[0] if idx not in rand_labelled_idx]
+        selected_idx = rand_idx[selected_idx].tolist()
 
         assert torch.as_tensor([idx not in labelled_idx for idx in selected_idx]).all(), \
             "Error: selected idx already labelled"
 
-        loss = self.loss(preds, x=x, labelled_idx=labelled_idx_bool)
+        loss = self.loss(preds, x=x, labelled_idx=selected_idx)
 
         return selected_idx, loss
+

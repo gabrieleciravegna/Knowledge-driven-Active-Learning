@@ -231,7 +231,7 @@ def evaluate(network: MLP, data: TensorDataset,
              batch_size=None, loss=torch.nn.BCELoss(reduction="none"),
              metric: Metric = None, device=torch.device("cpu"),
              return_preds=False) \
-        -> Union[tuple[float, Tensor, Tensor], tuple[float, Tensor]]:
+        -> Union[Tuple[float, Tensor, Tensor], Tuple[float, Tensor]]:
 
     if metric is None:
         metric = F1()
