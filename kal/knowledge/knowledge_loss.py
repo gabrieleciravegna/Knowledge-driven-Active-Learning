@@ -27,7 +27,7 @@ class KnowledgeLoss:
                 print(f"Very high constraint loss {loss_sum[index]} for index {index}")
                 class_preds = strange_prediction > 0.5
                 if self.names is not None:
-                    name_strange_pred = self.names[class_preds]
+                    name_strange_pred = self.names[class_preds.cpu().numpy()]
                     print(f"Class predicted: {name_strange_pred}")
                 else:
                     print(f"Class idx predicted: {torch.where(class_preds)[0]}")

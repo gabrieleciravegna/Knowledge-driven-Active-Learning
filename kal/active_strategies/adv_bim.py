@@ -8,8 +8,11 @@ from kal.active_strategies.strategy import Strategy
 
 class AdversarialBIMSampling(Strategy):
 
-    def __init__(self, *args, eps=0.05, k_sample=1000, max_iter=100, **kwargs):
+    def __init__(self, *args, eps=0.05, k_sample=1000, max_iter=100, main_classes=None, **kwargs):
+        assert main_classes is not None, "Need to pass the list of main classes"
+
         super(AdversarialBIMSampling, self).__init__(*args, **kwargs)
+        self.main_classes = main_classes
         self.eps = eps
         self.k_sample = k_sample
         self.max_iter = max_iter
@@ -29,6 +32,7 @@ class AdversarialBIMSampling(Strategy):
             eta = torch.zeros(nx.shape).to(dev)
 
             _, out = clf(nx + eta, return_logits=True)
+            out = out[:, self.main_classes]
             py = out.max(1)[1]
             ny = out.max(1)[1]
 
@@ -46,6 +50,7 @@ class AdversarialBIMSampling(Strategy):
                 nx.grad.data.zero_()
 
                 _, out = clf(nx + eta, return_logits=True)
+                out = out[:, self.main_classes]
                 py = out.max(1)[1]
 
             if i_iter == self.max_iter:
@@ -61,7 +66,6 @@ class AdversarialBIMSampling(Strategy):
         assert x is not None, "Need to pass the Input data in the Adv DeepFool selection"
 
         n_sample = preds.shape[0]
-
         rand_idx = torch.randperm(n_sample)[:self.k_sample]
         rand_x = x[rand_idx]
 

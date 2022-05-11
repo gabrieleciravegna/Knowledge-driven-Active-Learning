@@ -1,3 +1,5 @@
+from data.Cifar100 import CLASS_1_HOTS
+from kal.knowledge.cifar100 import CIFAR100Loss
 
 if __name__ == "__main__":
 
@@ -39,18 +41,18 @@ if __name__ == "__main__":
     from sklearn.model_selection import StratifiedKFold
 
     from kal.active_strategies import STRATEGIES, SAMPLING_STRATEGIES, ADV_DEEPFOOL, ADV_BIM, ENTROPY, ENTROPY_D, BALD, \
-    KALS, MARGIN, MARGIN_D, DROPOUTS, KAL_PLUS_DROP_DU, FAST_STRATEGIES, KMEANS, TO_RERUN
+    KALS, MARGIN, MARGIN_D, DROPOUTS, KAL_PLUS_DROP_DU, FAST_STRATEGIES, KMEANS, KCENTER, TO_RERUN
     from kal.network import MLP, train_loop, evaluate, predict, predict_dropout
     from kal.utils import visualize_active_vs_sup_loss, set_seed
 
     from data.Cub200 import CUBDataset
-    from data.CUB200 import classes
+    from data.Cifar100 import classes
     from kal.metrics import F1
     from kal.knowledge import CUB200Loss
 
     plt.rc('animation', html='jshtml')
 
-    dataset = "CUB200"
+    dataset = "cifar100"
     model_folder = os.path.join("models", dataset)
     result_folder = os.path.join("results", dataset)
     image_folder = os.path.join("images", dataset)
@@ -69,7 +71,7 @@ if __name__ == "__main__":
     now = str(datetime.datetime.now()).replace(":", ".")
     dev = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
     print(f"Working on {dev}")
-    KLoss = partial(CUB200Loss, names=classes)
+    KLoss = partial(CIFAR100Loss, names=classes)
 
     #%% md
 
@@ -78,18 +80,21 @@ if __name__ == "__main__":
 
     #%%
 
-    first_points = 2000
-    n_points = 200
-    n_iterations = 25
+    first_points = 1000
+    n_points = 100
+    n_iterations = 90
     seeds = 5
     epochs = 100
-    num_classes = 308
+    num_classes = 120
     hidden_size = num_classes * 2
     lr = 1e-3
     metric = F1()
     load = True
 
-    strategies = STRATEGIES[:-1]
+    # strategies = [KMEANS]
+    strategies = STRATEGIES[::-1][2:]
+    strategies.pop(strategies.index(KCENTER))
+    strategies.pop(strategies.index(KMEANS))
     # strategies = FAST_STRATEGIES
     # strategies = [ENTROPY_D, ENTROPY, MARGIN_D, MARGIN, ]
     # strategies = KALS[::-1]
@@ -111,43 +116,43 @@ if __name__ == "__main__":
     annoying_dir = os.path.join(data_folder, "__pycache__")
     if os.path.isdir(annoying_dir):
         shutil.rmtree(annoying_dir)
-    dataset = CUBDataset(data_folder, transform)
-
+    dataset = torchvision.datasets.CIFAR100(data_folder,
+                                            download=True,
+                                            transform=transform,
+                                            train=True)
+    dataset.main_classes = [*range(100)]
     feature_extractor = torchvision.models.resnet50(pretrained=True)
     feature_extractor.fc = torch.nn.Identity()
     data_loader = DataLoader(dataset, batch_size=128, num_workers=8)
     tot_points = len(dataset)
-    class_names = classes
-    n_classes = len(class_names)
+
+    #%%
 
     feature_file = os.path.join(data_folder, "ResNet50-TL-feats.pth")
     if os.path.isfile(feature_file):
-        x = torch.load(feature_file, map_location=dev)
-        y = dataset.targets
+        x = torch.load(feature_file)
+        y = [CLASS_1_HOTS[dataset.classes[t]] for t in dataset.targets]
         print("Features loaded")
     else:
         x, y = [], []
         with torch.no_grad():
             feature_extractor.eval(), feature_extractor.to(dev)
-            for i, (batch_data, batch_labels) in enumerate(tqdm.tqdm(data_loader)):
+            for batch_data, batch_labels in tqdm.tqdm(data_loader):
                 batch_x = feature_extractor(batch_data.to(dev))
                 x.append(batch_x)
                 y.append(batch_labels)
             x = torch.cat(x)
-            y = torch.cat(y)
             torch.save(x, feature_file)
+            y = [CLASS_1_HOTS[dataset.classes[t]] for t in dataset.targets]
     input_size = x.shape[1]
+
 
     #%%
     #### Visualizing and checking knowledge loss on the labels
 
-    KLoss = partial(CUB200Loss, main_classes=dataset.main_classes,
-                    attributes=dataset.attributes,
-                    combinations=dataset.class_attr_comb
-        )
     x_t = torch.as_tensor(x, dtype=torch.float).to(dev)
     y_t = torch.as_tensor(y, dtype=torch.float).to(dev)
-    cons_loss = KLoss()(y_t).sort()[0].cpu().numpy()
+    cons_loss = KLoss()(y_t, targets=True).sort()[0].cpu().numpy()
     sns.scatterplot(x=[*range(len(cons_loss))], y=cons_loss)
     plt.show()
 
@@ -156,20 +161,20 @@ if __name__ == "__main__":
     dfs = []
     skf = StratifiedKFold(n_splits=seeds)
 
-    for seed, (train_idx, test_idx) in enumerate(skf.split(x_t.cpu(), y_t.argmax(dim=1).cpu())):
-        train_sample = len(train_idx)
-        set_seed(seed)
-        first_idx = np.random.choice(train_sample, first_points, replace=False).tolist()
-        print("First idx", first_idx)
-        # if seed > 3:
-        #     break
-        for strategy in strategies:
-            active_strategy = SAMPLING_STRATEGIES[strategy](k_loss=KLoss, main_classes=dataset.main_classes)
+    for strategy in strategies:
+        for seed, (train_idx, test_idx) in enumerate(skf.split(x_t.cpu(), y_t.argmax(dim=1).cpu())):
+            train_sample = len(train_idx)
+            set_seed(seed)
+            first_idx = np.random.choice(train_sample, first_points, replace=False).tolist()
+            # print("First idx", first_idx)
 
             df_file = os.path.join(result_folder, f"metrics_{n_points}_points_"
                                                   f"{seed}_seed_{strategy}_strategy.pkl")
             if os.path.exists(df_file) and load and strategy not in TO_RERUN:
                 df = pd.read_pickle(df_file)
+                if "Predictions" in df:
+                    df.pop("Predictions")
+                    df.to_pickle(df_file)
                 dfs.append(df)
                 auc = df['Test Accuracy'].mean()
                 print(f"Already trained {df_file}, auc: {auc}")
@@ -199,8 +204,12 @@ if __name__ == "__main__":
             metric = F1()
 
             set_seed(0)
+
+            active_strategy = SAMPLING_STRATEGIES[strategy](k_loss=KLoss,
+                                                            main_classes=dataset.main_classes)
+
             net = MLP(input_size=input_size, hidden_size=hidden_size,
-                      n_classes=n_classes, dropout=True).to(dev)
+                      n_classes=num_classes, dropout=True).to(dev)
 
             # first training with few randomly selected data
             losses = []
@@ -208,7 +217,7 @@ if __name__ == "__main__":
             for it in (pbar := trange(0, n_iterations)):
                 t = time.time()
 
-                losses += train_loop(net, train_dataset, used_idx, epochs,
+                losses += train_loop(net, train_dataset, used_idx, epochs * 2 if it == 0 else epochs,
                                      lr=lr, loss=loss, device=dev)
                 train_accuracy, _, preds_t = evaluate(net, train_dataset, loss=loss,
                                                       device=dev, return_preds=True)

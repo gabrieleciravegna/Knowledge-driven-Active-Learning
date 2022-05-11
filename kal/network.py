@@ -8,12 +8,33 @@ import torch.nn.functional as F
 from torch import Tensor
 from torch.utils.data import DataLoader, TensorDataset, Subset
 from torchvision.models import ResNet
-from torchvision.models.resnet import BasicBlock
+from torchvision.models.resnet import BasicBlock, resnet18
 from tqdm import trange
 
 from kal.metrics import Metric, F1
 
 num_workers = 0
+
+
+class ResNet18(torch.nn.Module):
+    def __init__(self, n_classes, transfer_learning=False, pretrained=True):
+        super().__init__()
+        self.model = resnet18(pretrained=pretrained, progress=True)
+
+        if transfer_learning:
+            for param in self.model.parameters():
+                param.requires_grad = False
+        feat_dim = self.model.fc.weight.shape[1]
+        self.model.fc = torch.nn.Linear(feat_dim, n_classes)
+        self.activation = torch.nn.Sigmoid()
+
+    def forward(self, x, return_logits=False):
+        logits = self.model(x)
+        output = self.activation(logits)
+
+        if return_logits:
+            return output, logits
+        return output
 
 
 class ResNet10(torch.nn.Module):
@@ -92,7 +113,7 @@ def train_loop(network: torch.nn.Module, data: TensorDataset, train_idx: List,
     l_train = []
     network.train()
     pbar = trange(epochs) if verbose else range(epochs)
-    for j in pbar:
+    for _ in pbar:
         for input_data, labels in data_loader:
             input_data, labels = input_data.to(device), labels.to(device)
             optimizer.zero_grad()
@@ -104,18 +125,16 @@ def train_loop(network: torch.nn.Module, data: TensorDataset, train_idx: List,
             optimizer.step()
             l_train.append(s_l)
 
+    network.eval()
     if verbose:
         pbar.close()
 
-    network.eval()
-
+    l_train = torch.stack(l_train).detach().cpu().tolist()
     if visualize_loss:
         sns.lineplot(data=l_train)
         plt.ylabel("Loss"), plt.xlabel("Epochs")
         plt.title("Training loss variations in function of the epochs")
         plt.show()
-
-    l_train = torch.stack(l_train).detach().cpu().tolist()
 
     assert l_train[-1] < 10, f"Error in fitting the data. " \
                              f"High training loss {l_train[-1]:.2f}." \
@@ -158,7 +177,7 @@ def predict(network, data: TensorDataset, batch_size=None, loss=None,
 
 
 def predict_dropout(network, data: TensorDataset, batch_size=None,
-                    device=torch.device("cpu")) -> Tensor:
+                    device=torch.device("cpu"), n_splits=5) -> Tensor:
     network.train()
     network.to(device)
 
@@ -168,15 +187,19 @@ def predict_dropout(network, data: TensorDataset, batch_size=None,
         data_loader = DataLoader(data, batch_size=batch_size,
                                  num_workers=num_workers, shuffle=False)
 
-    preds = []
     with torch.no_grad():
-        for input_data, labels in data_loader:
-            input_data, labels = input_data.to(device), labels.to(device)
-            p_t = network(input_data)
-            preds.append(p_t.squeeze())
-    preds = torch.cat(preds)
+        preds_drop = []
+        for _ in range(n_splits):
+            preds = []
+            for input_data, labels in data_loader:
+                input_data, labels = input_data.to(device), labels.to(device)
+                p_t = network(input_data)
+                preds.append(p_t.squeeze())
+            preds = torch.cat(preds)
+            preds_drop.append(preds)
+        preds_drop = torch.stack(preds_drop).mean(dim=0)
 
-    return preds
+    return preds_drop
 
 
 def predict_dropout_splits(network, data: TensorDataset, batch_size=None,
@@ -206,7 +229,9 @@ def predict_dropout_splits(network, data: TensorDataset, batch_size=None,
 
 def evaluate(network: MLP, data: TensorDataset,
              batch_size=None, loss=torch.nn.BCELoss(reduction="none"),
-             metric: Metric = None, device=torch.device("cpu")) -> Tuple[float, List]:
+             metric: Metric = None, device=torch.device("cpu"),
+             return_preds=False) \
+        -> Union[tuple[float, Tensor, Tensor], tuple[float, Tensor]]:
 
     if metric is None:
         metric = F1()
@@ -221,5 +246,8 @@ def evaluate(network: MLP, data: TensorDataset,
     preds, l_test = predict(network, data, batch_size, loss, device)
 
     accuracy = metric(preds, labels)
+
+    if return_preds:
+        return accuracy, l_test, preds
 
     return accuracy, l_test

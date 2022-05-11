@@ -627,4 +627,4 @@ name_list = [
 ]
 
 CLASS_1_HOTS = {key.lower(): val for key, val in CLASS_1_HOTS.items()}
-name_list = [name.lower() for name in name_list]
+classes = [name.lower() for name in name_list]

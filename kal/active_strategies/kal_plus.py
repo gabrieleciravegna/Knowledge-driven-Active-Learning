@@ -106,11 +106,13 @@ class KALPlusSampling(Strategy):
                 if len(selected_idx) == n_p:
                     break
             if len(selected_idx) < n_p:
-                print("Breaking diversity")
-                selected_idx, c_loss_plus = KALPlusSampling.selection(self, preds,
-                                                                 labelled_idx, n_p,
-                                                                 c_loss_plus=c_loss_plus,
-                                                                 arg_max=arg_max, x=x)
+                # print("Breaking diversity")
+                j = 0
+                while len(selected_idx) < n_p:
+                    if cal_idx[j] not in selected_idx:
+                        selected_idx.append(cal_idx[j])
+                    j += 1
+
             assert len(selected_idx) == n_p, "Error in the diversity " \
                                              "selection operation"
             return selected_idx, c_loss_plus

@@ -14,6 +14,10 @@ def delete(arr: torch.Tensor, ind: int, dim: int) -> torch.Tensor:
 
 class KCenterSampling(Strategy):
 
+    def __init__(self, *args, k_sample=1e4, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.k_sample=1e4
+
     def loss(self, preds, *args, x: torch.Tensor = None, labelled_idx: list = None, **kwargs) \
             -> torch.Tensor:
         assert x is not None, "Input data/Embeddings need to be passed " \
@@ -36,11 +40,12 @@ class KCenterSampling(Strategy):
                               "in KMeans Sampling selection method"
 
         n_sample = preds.shape[0]
+
         labelled_idx_bool = np.zeros(n_sample, dtype=bool)
         labelled_idx_bool[labelled_idx] = True
         # x = x.detach().cpu().numpy()
 
-        dist_mat = torch.matmul(x, x.T)
+        dist_mat = torch.matmul(x.cpu(), x.T.cpu())
         sq = torch.diagonal(dist_mat).reshape(n_sample, 1).clone()
         dist_mat *= -2
         dist_mat += sq
@@ -65,26 +70,3 @@ class KCenterSampling(Strategy):
         loss = self.loss(preds, x=x, labelled_idx=labelled_idx_bool)
 
         return selected_idx, loss
-
-        #
-        # sq = np.array(dist_mat.diagonal()).reshape(n_sample, 1)
-        # dist_mat *= -2
-        # dist_mat += sq
-        # dist_mat += sq.transpose()
-        # dist_mat = np.sqrt(dist_mat)
-        #
-        # mat = dist_mat[avail_idx, :][:, labelled_idx]
-        #
-        # selected_idx = []
-        # for i in range(n_p):
-        #     mat_min = mat.min(axis=1)
-        #     i_center = mat_min.argmax()
-        #     i_center_idx = avail_idx[i_center]
-        #     selected_idx.append(i_center_idx)
-        #
-        #     avail_idx = avail_idx[avail_idx != i_center_idx]
-        #     labelled_idx = np.append(labelled_idx, i_center_idx)
-        #
-        #     mat = np.delete(mat, i_center, 0)
-        #     mat = np.append(mat, dist_mat[avail_idx, i_center][:, None], axis=1)
-

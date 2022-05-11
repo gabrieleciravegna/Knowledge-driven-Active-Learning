@@ -1,6 +1,6 @@
-import tqdm
 
 if __name__ == "__main__":
+
     #%% md
 
     # Constrained Active Learning - Experiment on the ANIMALS problem
@@ -13,10 +13,12 @@ if __name__ == "__main__":
 
     #%matplotlib inline
     #%autosave 10
+
     import os
     os.environ["CUDA_VISIBLE_DEVICES"] = ""
     os.environ["PYTHONPYCACHEPREFIX"] = os.path.join("..", "__pycache__")
 
+    import tqdm
     import shutil
     import random
     import datetime
@@ -34,10 +36,9 @@ if __name__ == "__main__":
     from torchvision.transforms import transforms
     from tqdm import trange
     from sklearn.model_selection import StratifiedKFold
-    from sklearn.neighbors import LocalOutlierFactor
 
     from kal.active_strategies import STRATEGIES, SAMPLING_STRATEGIES, ADV_DEEPFOOL, ADV_BIM, ENTROPY, ENTROPY_D, BALD, \
-    KALS, MARGIN, MARGIN_D, DROPOUTS, KAL_PLUS_DROP_DU
+    KALS, MARGIN, MARGIN_D, DROPOUTS, KAL_PLUS_DROP_DU, KCENTER, KMEANS, NAME_MAPPINGS_LATEX, RANDOM, NAME_MAPPINGS
     from kal.network import MLP, train_loop, evaluate, predict, predict_dropout
     from kal.utils import visualize_active_vs_sup_loss, set_seed
 
@@ -47,10 +48,10 @@ if __name__ == "__main__":
 
     plt.rc('animation', html='jshtml')
 
-    dataset = "animals"
-    model_folder = os.path.join("models", dataset)
-    result_folder = os.path.join("results", dataset)
-    image_folder = os.path.join("images", dataset)
+    dataset_name = "animals"
+    model_folder = os.path.join("models", dataset_name)
+    result_folder = os.path.join("results", dataset_name)
+    image_folder = os.path.join("images", dataset_name)
     data_folder = os.path.join("..", "data", "Animals")
     assert os.path.isdir(data_folder), "Data not available in the required folder"
 
@@ -69,18 +70,23 @@ if __name__ == "__main__":
     KLoss = partial(AnimalLoss, names=classes)
 
     #%%
-    first_points = 100
-    n_points = 100
+    first_points = 50
+    n_points = 50
     n_iterations = 49
-    seeds = 10
+    seeds = 5
     hidden_size = 100
     lr = 1e-3
-    epochs = 200
-    main_classes = 7
+    epochs = 250
+    main_classes = range(7)
     metric = F1()
     load = False
 
-    strategies = STRATEGIES
+    strategies = [BALD ]
+    # strategies = STRATEGIES
+    # strategies.pop(strategies.index(KMEANS))
+    # strategies.pop(strategies.index(KCENTER))
+    # strategies.pop(strategies.index(ADV_DEEPFOOL))
+    # strategies.pop(strategies.index(ADV_BIM))
     # strategies = [ENTROPY_D, ENTROPY, MARGIN_D, MARGIN, ]
     # strategies = KALS[::-1]
     # strategies = [KAL_PLUS_DROP_DU]
@@ -93,7 +99,6 @@ if __name__ == "__main__":
     # Data pass through a RESNET 50 first which extract the data features
 
     #%%
-    feature_file = "../data/Animals/ResNet50-TL-feats.pth"
     transform = transforms.Compose([
         transforms.Resize(256),
         transforms.CenterCrop(224),
@@ -104,6 +109,7 @@ if __name__ == "__main__":
     if os.path.isdir(annoying_dir):
         shutil.rmtree(annoying_dir)
     dataset = torchvision.datasets.ImageFolder(data_folder, transform=transform)
+
     feature_extractor = torchvision.models.resnet50(pretrained=True)
     feature_extractor.fc = torch.nn.Identity()
     data_loader = DataLoader(dataset, batch_size=128, num_workers=8)
@@ -111,6 +117,7 @@ if __name__ == "__main__":
     class_names = classes
     n_classes = len(class_names)
 
+    feature_file = os.path.join(data_folder, "ResNet50-TL-feats.pth")
     if os.path.isfile(feature_file):
         x = torch.load(feature_file)
         y = dataset.targets
@@ -120,8 +127,7 @@ if __name__ == "__main__":
         x, y = [], []
         with torch.no_grad():
             feature_extractor.eval(), feature_extractor.to(dev)
-            for i, (batch_data, batch_labels) in enumerate(data_loader):
-                print(f"{i}/{len(data_loader)} it, time: {datetime.datetime.now()}")
+            for i, (batch_data, batch_labels) in enumerate(tqdm.tqdm(data_loader)):
                 batch_x = feature_extractor(batch_data.to(dev))
                 x.append(batch_x)
                 y.append(batch_labels)
@@ -139,7 +145,7 @@ if __name__ == "__main__":
     cons_loss = KLoss()(y_t).sort()[0].cpu().numpy()
     sns.scatterplot(x=[*range(len(cons_loss))], y=cons_loss)
     plt.show()
-    
+
     #%%
     #### Active Learning Strategy Comparison
     dfs = []
@@ -152,7 +158,8 @@ if __name__ == "__main__":
         print("First idx", first_idx)
 
         for strategy in strategies:
-            active_strategy = SAMPLING_STRATEGIES[strategy](k_loss=KLoss)
+            active_strategy = SAMPLING_STRATEGIES[strategy](k_loss=KLoss,
+                                                            main_classes=main_classes)
             df_file = os.path.join(result_folder, f"metrics_{n_points}_points_"
                                                   f"{seed}_seed_{strategy}_strategy.pkl")
             if os.path.exists(df_file) and load:
@@ -168,7 +175,7 @@ if __name__ == "__main__":
                 "Iteration": [],
                 "Active Idx": [],
                 "Used Idx": [],
-                "Predictions": [],
+                # "Predictions": [],
                 "Accuracy": [],
                 "Supervision Loss": [],
                 "Active Loss": [],
@@ -176,11 +183,6 @@ if __name__ == "__main__":
                 "Train Idx": [],
                 "Test Idx": []
             }
-
-            if strategy in DROPOUTS:
-                dropout = True
-            else:
-                dropout = False
 
             x_train, y_train = x_t[train_idx], y_t[train_idx]
             x_test, y_test = x_t[test_idx], y_t[test_idx]
@@ -191,33 +193,32 @@ if __name__ == "__main__":
 
             set_seed(0)
             net = MLP(input_size=input_size, hidden_size=hidden_size,
-                      n_classes=n_classes, dropout=dropout).to(dev)
+                      n_classes=n_classes, dropout=True).to(dev)
 
             # first training with few randomly selected data
             used_idx = first_idx.copy()
-            losses = train_loop(net, train_dataset, used_idx, epochs,
-                                lr=lr, loss=loss, visualize_loss=False)
-            test_accuracy, sup_loss = evaluate(net, test_dataset, metric=metric, loss=loss)
-
+            losses = []
             for it in (pbar := tqdm.trange(1, n_iterations + 1)):
-                pbar.set_description(f"{strategy} {seed + 1}/{seeds}, "
-                                     f"acc: {np.mean([0] + df['Accuracy']):.2f}, s_l: {mean(sup_loss):.2f}, "
-                                     f"l: {losses[-1]:.2f}, p: {len(used_idx)}")
                 t = time.time()
 
-                preds_t = predict(net, train_dataset)
-                preds_dropout = predict_dropout(net, train_dataset)
+                losses += train_loop(net, train_dataset, used_idx, epochs,
+                                     lr=lr, loss=loss, device=dev)
 
-                assert not dropout or (preds_dropout - preds_t).abs().sum() > .01, \
-                    "Error in computing dropout predictions"
+                preds_t = predict(net, train_dataset, device=dev)
+                if strategy in DROPOUTS:
+                    preds_dropout = predict_dropout(net, train_dataset, device=dev)
+                    assert (preds_dropout - preds_t).abs().sum() > .0, \
+                        "Error in computing dropout predictions"
+                else:
+                    preds_dropout = None
 
-                test_accuracy, sup_loss = evaluate(net, test_dataset, metric=metric, loss=loss)
+                test_accuracy, sup_loss = evaluate(net, test_dataset, metric=metric, loss=loss, device=dev)
 
                 active_idx, active_loss = active_strategy.selection(preds_t, used_idx, n_points,
-                                                                    x=x_t[train_idx], labels=y_t[train_idx].cpu(),
+                                                                    x=x_t[train_idx], labels=y_t[train_idx],
                                                                     preds_dropout=preds_dropout,
                                                                     clf=net, dataset=train_dataset,
-                                                                    main_classes=range(main_classes))
+                                                                    main_classes=main_classes)
                 used_idx += active_idx
 
                 df["Strategy"].append(strategy)
@@ -225,7 +226,7 @@ if __name__ == "__main__":
                 df["Iteration"].append(it)
                 df["Active Idx"].append(active_idx.copy())
                 df["Used Idx"].append(used_idx.copy())
-                df["Predictions"].append(preds_t.cpu().numpy())
+                # df["Predictions"].append(preds_t.cpu().numpy())
                 df["Accuracy"].append(test_accuracy)
                 df["Supervision Loss"].append(sup_loss)
                 df["Active Loss"].append(active_loss.cpu().numpy())
@@ -235,14 +236,10 @@ if __name__ == "__main__":
 
                 assert isinstance(used_idx, list), "Error"
 
-                if it != n_iterations:
-                    losses += train_loop(net, train_dataset, used_idx, epochs,
-                                         lr=lr, loss=loss)
-                else:
-                    pbar.set_description(f"{strategy} {seed + 1}/{seeds}, "
-                                         f"{np.mean([0] + df['Accuracy']):.2f}, "
-                                         f"s_l: {mean(sup_loss):.2f}, "
-                                         f"l: {losses[-1]:.2f}, p: {len(used_idx)}")
+                pbar.set_description(f"{strategy} {seed + 1}/{seeds}, "
+                                     f"auc: {np.mean(df['Accuracy']):.2f}, "
+                                     f"s_l: {mean(sup_loss):.2f}, "
+                                     f"l: {losses[-1]:.2f}, p: {len(used_idx)}")
 
             if seed == 0:
                 sns.lineplot(data=losses)
@@ -265,36 +262,78 @@ if __name__ == "__main__":
     dfs = pd.read_pickle(os.path.join(f"{result_folder}",
                                       f"metrics_{n_points}_points_{now}.pkl"))
     dfs['Points'] = [len(used) for used in dfs['Used Idx']]
-    ours = [False if "KAL" in strategy else True for strategy in dfs['Strategy']]
+    ours = ["KAL" in strategy for strategy in dfs['Strategy']]
     dfs['Ours'] = ours
 
     dfs = dfs.sort_values(['Strategy', 'Seed', 'Iteration'])
     dfs = dfs.reset_index()
 
     rows = []
+    Strategies = []
     for i, row in dfs.iterrows():
         if row['Points'] > (n_points * n_iterations + first_points):
             dfs = dfs.drop(i)
+        else:
+            Strategies.append(NAME_MAPPINGS_LATEX[row['Strategy']])
+    dfs['Strategy'] = Strategies
 
-    dfs_auc = dfs.groupby("Strategy").mean()['Accuracy']
-    print(dfs_auc.to_latex())
+    aucs = []
+    dfs_auc_mean = dfs.groupby("Strategy").mean()['Accuracy'].tolist()
+    dfs_auc_std = dfs.groupby(["Strategy", "Seed"]).mean()['Accuracy'] \
+        .groupby("Strategy").std().tolist()
+    for mean, std in zip(dfs_auc_mean, dfs_auc_std):
+        auc = f"${mean:.2f}$ {{\\tiny $\\pm {std:.2f}$ }}"
+        aucs.append(auc)
+    df_auc = pd.DataFrame({
+        "Strategy": np.unique(Strategies),
+        "AUC": aucs,
+    }).set_index("Strategy")
+    print(df_auc.to_latex(float_format="%.2f", escape=False))
     with open(os.path.join(f"{result_folder}",
-                           f"auc_latex_{now}.txt"), "w") as f:
-        f.write(dfs_auc.to_latex())
+                           f"table_auc_latex_{now}.txt"), "w") as f:
+        f.write(df_auc.to_latex(float_format="%.2f", escape=False))
 
-    dfs_time = dfs.groupby("Strategy").mean()['Time']
-    print(dfs_time.to_latex())
+    final_accs = []
+    dfs_final_accs = dfs[dfs['Iteration'] == n_iterations - 1]
+    final_accs_mean = dfs_final_accs.groupby("Strategy").mean()['Accuracy'].tolist()
+    final_accs_std = dfs_final_accs.groupby("Strategy").std()['Accuracy'].tolist()
+    for mean, std in zip(final_accs_mean, final_accs_std):
+        final_acc = f"${mean:.2f}$ {{\\tiny $\\pm {std:.2f}$ }}"
+        final_accs.append(final_acc)
+    df_final_acc = pd.DataFrame({
+        "Strategy": np.unique(Strategies),
+        "Final F1": final_accs,
+    }).set_index("Strategy")
+    print(df_final_acc.to_latex(float_format="%.2f", escape=False))
     with open(os.path.join(f"{result_folder}",
-                           f"time_latex_{now}.txt"), "w") as f:
-        f.write(dfs_time.to_latex())
+                           f"table_final_acc_latex_{now}.txt"), "w") as f:
+        f.write(df_final_acc.to_latex(float_format="%.2f", escape=False))
 
+    times = []
+    dfs_time_mean = dfs.groupby("Strategy").mean()['Time']
+    base_time = dfs_time_mean[dfs_time_mean.index == RANDOM].item()
+    for time in dfs_time_mean.tolist():
+        time = time / base_time
+        time = time if time >= 1. else 1.
+        time = f"${time:.2f}$ x"
+        times.append(time)
+    df_times = pd.DataFrame({
+        "Strategy": np.unique(Strategies),
+        "Times": times
+    }).set_index("Strategy")
+    print(df_times.to_latex(float_format="%.2f", escape=False))
+    with open(os.path.join(f"{result_folder}",
+                           f"table_times_latex_{now}.txt"), "w") as f:
+        f.write(df_times.to_latex(float_format="%.2f", escape=False))
 
-    #%%
+    # %%
 
     sns.set(style="whitegrid", font_scale=1.5,
             rc={'figure.figsize': (10, 8)})
     sns.lineplot(data=dfs, x="Points", y="Accuracy",
-                 hue="Strategy", style="Ours", size="Ours", legend=False, ci=None)
+                 hue="Strategy", style="Ours", size="Ours",
+                 legend=False, ci=None, style_order=[1, 0],
+                 size_order=[1, 0], sizes=[4,2])
     sns.despine(left=True, bottom=True)
     plt.tight_layout()
     plt.ylabel("Accuracy")
@@ -302,27 +341,26 @@ if __name__ == "__main__":
     # plt.xlim([-10, 400])
     # plt.title("Comparison of the accuracies in the various strategy
     #            in function of the iterations")
-    plt.legend(title='Strategy', loc='lower right', labels=sorted(strategies))
-    plt.savefig(f"{image_folder}\\Accuracy_{n_points}_points_{now}.png",
+    labels = [NAME_MAPPINGS[strategy] for strategy in sorted(strategies)]
+    plt.legend(title='Strategy', loc='lower right', labels=labels)
+    plt.savefig(f"{image_folder}\\Accuracy_{dataset_name}_{n_points}_points_{now}.png",
                 dpi=200)
-
     plt.show()
 
+    # %% md
 
-    #%% md
-
-    #### Displaying some pictures from the animations
+    #### Displaying some pictures to visualize training
 
     # %%
 
-    sns.set(style="ticks", font="Times New Roman", font_scale=1.3,
-            rc={'figure.figsize': (6, 5)})
-    for strategy in strategies:
-        # iterations = [10] if strategy != SUPERVISED else [15]
-        iterations = [*range(1, 10)]
-        for i in iterations:
-            print(f"Iteration {i}/{len(iterations)} {strategy} strategy")
-            png_file = os.path.join(f"{image_folder}", f"{strategy}_{i}.png")
-            # if not os.path.exists(png_file):
-            visualize_active_vs_sup_loss(x_t, i, strategy, dfs, png_file, )
-
+    # sns.set(style="ticks", font="Times New Roman", font_scale=1.3,
+    #         rc={'figure.figsize': (6, 5)})
+    # for strategy in strategies:
+    #     # iterations = [10] if strategy != SUPERVISED else [15]
+    #     iterations = [*range(1, 10)]
+    #     for i in iterations:
+    #         print(f"Iteration {i}/{len(iterations)} {strategy} strategy")
+    #         png_file = os.path.join(f"{image_folder}", f"{strategy}_{i}.png")
+    #         # if not os.path.exists(png_file):
+    #         visualize_active_vs_sup_loss(x_t, i, strategy, dfs, png_file, )
+    #

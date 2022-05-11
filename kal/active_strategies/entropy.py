@@ -7,11 +7,20 @@ from kal.active_strategies.strategy import Strategy
 
 class EntropySampling(Strategy):
 
+    def __init__(self, *args, main_classes=None, **kwargs):
+        assert main_classes is not None, "Main classes need to be passed to Entropy Sampling"
+        super().__init__(*args, **kwargs)
+        self.main_classes = main_classes
+
     def loss(self, preds: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         assert len(preds.shape) > 1, "Entropy Sampling requires multi-class prediction"
 
-        log_probs = torch.log(preds)
-        uncertainties = - (preds * log_probs).sum(1)
+        main_preds = preds[:, self.main_classes]
+        logits = torch.logit(main_preds, eps=1e-4)
+        probs = torch.softmax(logits, dim=1)
+
+        log_probs = torch.log(probs)
+        uncertainties = - (probs * log_probs).sum(1)
 
         return uncertainties
 

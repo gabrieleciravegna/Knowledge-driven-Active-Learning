@@ -2,16 +2,20 @@ from typing import Tuple, List
 
 import numpy as np
 import torch
+from tqdm import trange
 
 from kal.active_strategies.strategy import Strategy
 
 
 class AdversarialDeepFoolSampling(Strategy):
 
-    def __init__(self, *args, max_iter=20, k_sample=1000,
+    def __init__(self, *args, max_iter=20, k_sample=1000, main_classes=None,
                  **kwargs):
+        assert main_classes is not None, "Need to pass the list of main classes"
+
         self.max_iter = max_iter
         self.k_sample = k_sample
+        self.main_classes = main_classes
         super(AdversarialDeepFoolSampling, self).__init__(*args, **kwargs)
 
     def loss(self, preds: torch.Tensor, *args, clf: torch.nn.Module = None,  x: torch.Tensor = None,
@@ -22,7 +26,7 @@ class AdversarialDeepFoolSampling(Strategy):
 
         dis = torch.zeros(x.shape[0])
         dev = next(clf.parameters()).device
-        for j in range(x.shape[0]):
+        for j in trange(x.shape[0]):
 
             x_j = x[j]
             nx = torch.unsqueeze(x_j, 0).to(dev)
@@ -30,6 +34,7 @@ class AdversarialDeepFoolSampling(Strategy):
             eta = torch.zeros(nx.shape).to(dev)
 
             _, out = clf(nx + eta, return_logits=True)
+            out = out[:, self.main_classes]
             n_class = out.shape[1]
             py = out.max(1)[1].item()
             ny = out.max(1)[1].item()
@@ -60,6 +65,7 @@ class AdversarialDeepFoolSampling(Strategy):
                 eta += ri.clone() if ri is not None else 0.
                 nx.grad.data.zero_()
                 _, out = clf(nx + eta, return_logits=True)
+                out = out[:, self.main_classes]
                 py = out.max(1)[1].item()
                 i_iter += 1
 

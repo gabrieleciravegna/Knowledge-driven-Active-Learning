@@ -14,7 +14,7 @@ from .uncertainty import UncertaintySampling, UncertaintyDropoutSampling
 from .margin import MarginSampling, MarginDropoutSampling
 from .kmeans import KMeansSampling
 from .kcenter import KCenterSampling
-from .bald import BALDSampling
+from .bald import BALDSampling, BALDSampling2
 
 SUPERVISED = "Supervised"
 RANDOM = "Random"
@@ -46,31 +46,29 @@ KCENTER = "CoreSet_KCenter"
 ENTROPY = "Entropy"
 ENTROPY_D = "Entropy_D"
 BALD = "BALD"
+BALD2 = "BALD2"
 ADV_DEEPFOOL = "Adv_DeepFool"
 ADV_BIM = "Adv_BIM"
 
 STRATEGIES = [
     SUPERVISED,
     RANDOM,
-    KAL,
-    KAL_U,
-    KAL_D,
+    # KAL,
+    # KAL_U,
+    # KAL_D,
     KAL_DU,
-    KAL_PLUS,
-    KAL_PLUS_U,
-    KAL_PLUS_D,
-    KAL_PLUS_DU,
-    KAL_PLUS_DROP,
-    KAL_PLUS_DROP_U,
-    KAL_PLUS_DROP_D,
-    KAL_PLUS_DROP_DU,
-    KAL_PLUS_SVM,
-    KAL_PLUS_TREE,
-    KAL_PLUS_LOF,
-    KAL_DROP,
-    KAL_DROP_U,
-    KAL_DROP_D,
+    # KAL_DROP,
+    # KAL_DROP_U,
+    # KAL_DROP_D,
     KAL_DROP_DU,
+    # KAL_PLUS,
+    # KAL_PLUS_U,
+    # KAL_PLUS_D,
+    # KAL_PLUS_DU,
+    # KAL_PLUS_DROP,
+    # KAL_PLUS_DROP_U,
+    # KAL_PLUS_DROP_D,
+    # KAL_PLUS_DROP_DU,
     UNCERTAINTY,
     UNCERTAINTY_D,
     MARGIN,
@@ -80,12 +78,13 @@ STRATEGIES = [
     ENTROPY,
     ENTROPY_D,
     BALD,
-    ADV_DEEPFOOL,
+    BALD2,
     ADV_BIM,
+    ADV_DEEPFOOL,
 ]
 
 FAST_STRATEGIES = [
-    KAL_U,
+    KAL_DU,
     SUPERVISED,
     RANDOM,
     MARGIN,
@@ -98,11 +97,17 @@ DROPOUTS = [
     KAL_DROP_U,
     KAL_DROP_D,
     KAL_DROP_DU,
+    KAL_PLUS_DROP,
+    KAL_PLUS_DROP_U,
+    KAL_PLUS_DROP_D,
+    KAL_PLUS_DROP_DU,
     ENTROPY_D,
     MARGIN_D,
     UNCERTAINTY_D,
-    BALD
 ]
+
+
+TO_RERUN = DROPOUTS + [ENTROPY, BALD, BALD2]
 
 KALS = [
     KAL_PLUS_DROP_DU,
@@ -154,6 +159,47 @@ SAMPLING_STRATEGIES: Dict[str, Callable[..., Strategy]] = {
     ENTROPY: EntropySampling,
     ENTROPY_D: EntropyDropoutSampling,
     BALD: BALDSampling,
+    BALD2: BALDSampling2,
     ADV_DEEPFOOL: AdversarialDeepFoolSampling,
     ADV_BIM: AdversarialBIMSampling
+}
+
+
+NAME_MAPPINGS = {
+    SUPERVISED: SUPERVISED,
+    RANDOM: RANDOM,
+    KAL_DU: "KAL",
+    KAL_DROP_DU: "KAL$_D$",
+    UNCERTAINTY: UNCERTAINTY,
+    UNCERTAINTY_D: UNCERTAINTY+"$_D$",
+    MARGIN: MARGIN,
+    MARGIN_D: MARGIN+"$_D$",
+    KMEANS: "CoreSet$_{KMEANS}$",
+    KCENTER: "CoreSet$_{KCENTER}$",
+    ENTROPY: ENTROPY,
+    ENTROPY_D: ENTROPY+"$_D$",
+    BALD: BALD,
+    BALD2: BALD+"2",
+    ADV_BIM: "ADV$_{BIM}$",
+    ADV_DEEPFOOL: "ADV$_{DEEPFOOL}$",
+}
+
+
+NAME_MAPPINGS_LATEX = {
+    SUPERVISED: SUPERVISED,
+    RANDOM: RANDOM,
+    KAL_DU: KAL,
+    KAL_DROP_DU: KAL + "{\\tiny $_D$}",
+    UNCERTAINTY: UNCERTAINTY,
+    UNCERTAINTY_D: UNCERTAINTY + "{\\tiny $_D$}",
+    MARGIN: MARGIN,
+    MARGIN_D: MARGIN + "{\\tiny $_D$}",
+    KMEANS: "CoreSet{\\tiny $_{KMEANS}$}",
+    KCENTER: "CoreSet{\\tiny $_{KCENTER}$}",
+    ENTROPY: ENTROPY,
+    ENTROPY_D: ENTROPY + "{\\tiny $_D$}",
+    BALD: BALD,
+    BALD2: BALD+"2",
+    ADV_BIM: "ADV{\\tiny $_{BIM}$}",
+    ADV_DEEPFOOL: "ADV{\\tiny $_{DEEPFOOL}$}",
 }

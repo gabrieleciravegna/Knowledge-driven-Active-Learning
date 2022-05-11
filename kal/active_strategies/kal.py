@@ -77,11 +77,13 @@ class KALSampling(Strategy):
                 if len(selected_idx) == n_p:
                     break
             if len(selected_idx) < n_p:
-                print("Breaking diversity")
-                selected_idx, c_loss = KALSampling.selection(self, preds,
-                                                             labelled_idx, n_p,
-                                                             c_loss=c_loss,
-                                                             arg_max=arg_max, x=x)
+                # print("Breaking diversity")
+                j = 0
+                while len(selected_idx) < n_p:
+                    if cal_idx[j] not in selected_idx:
+                        selected_idx.append(cal_idx[j])
+                    j += 1
+
             assert len(selected_idx) == n_p, "Error in the diversity " \
                                              "selection operation"
             return selected_idx, c_loss
@@ -124,11 +126,6 @@ class KALDiversityUncSampling(KALDiversitySampling):
     def __init__(self, k_loss: Callable[..., KnowledgeLoss], **kwargs):
         super(KALSampling, self).__init__()
         self.k_loss = k_loss(uncertainty=True)
-
-    def selection(self, *args, **kwargs) -> Tuple[List, torch.Tensor]:
-        if "diversity" in kwargs:
-            kwargs.pop("diversity")
-        return super().selection(*args, diversity=True, **kwargs)
 
 
 class KALDropSampling(KALSampling):
