@@ -16,7 +16,7 @@ class KCenterSampling(Strategy):
 
     def __init__(self, *args, k_sample=1e4, **kwargs):
         super().__init__(*args, **kwargs)
-        self.k_sample=1e4
+        self.k_sample = int(1e4)
 
     def loss(self, preds, *args, x: torch.Tensor = None, labelled_idx: list = None, **kwargs) \
             -> torch.Tensor:

@@ -33,3 +33,10 @@ AUGMENTATION_TRANSFORMS = transforms.Compose([
     RelativeLabels(),
     ToTensor(),
 ])
+
+DEFAULT_TRANSFORMS = transforms.Compose([
+    AbsoluteLabels(),
+    PadSquare(),
+    RelativeLabels(),
+    ToTensor(),
+])

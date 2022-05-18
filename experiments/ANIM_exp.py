@@ -15,7 +15,7 @@ if __name__ == "__main__":
     #%autosave 10
 
     import os
-    os.environ["CUDA_VISIBLE_DEVICES"] = ""
+    os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
     os.environ["PYTHONPYCACHEPREFIX"] = os.path.join("..", "__pycache__")
 
     import tqdm
@@ -38,7 +38,8 @@ if __name__ == "__main__":
     from sklearn.model_selection import StratifiedKFold
 
     from kal.active_strategies import STRATEGIES, SAMPLING_STRATEGIES, ADV_DEEPFOOL, ADV_BIM, ENTROPY, ENTROPY_D, BALD, \
-    KALS, MARGIN, MARGIN_D, DROPOUTS, KAL_PLUS_DROP_DU, KCENTER, KMEANS, NAME_MAPPINGS_LATEX, RANDOM, NAME_MAPPINGS
+    KALS, MARGIN, MARGIN_D, DROPOUTS, KAL_PLUS_DROP_DU, KCENTER, KMEANS, NAME_MAPPINGS_LATEX, RANDOM, NAME_MAPPINGS, \
+    KAL_PLUS_DU, KAL_PLUS
     from kal.network import MLP, train_loop, evaluate, predict, predict_dropout
     from kal.utils import visualize_active_vs_sup_loss, set_seed
 
@@ -70,26 +71,25 @@ if __name__ == "__main__":
     KLoss = partial(AnimalLoss, names=classes)
 
     #%%
-    first_points = 50
+    first_points = 100
     n_points = 50
-    n_iterations = 49
+    n_iterations = 48
     seeds = 5
     hidden_size = 100
     lr = 1e-3
     epochs = 250
     main_classes = range(7)
     metric = F1()
-    load = False
+    load = True
 
-    strategies = [BALD ]
-    # strategies = STRATEGIES
-    # strategies.pop(strategies.index(KMEANS))
-    # strategies.pop(strategies.index(KCENTER))
-    # strategies.pop(strategies.index(ADV_DEEPFOOL))
+    # strategies = [BALD]
+    strategies = STRATEGIES
+    # # strategies.pop(strategies.index(KMEANS))
+    # # strategies.pop(strategies.index(KCENTER))
+    strategies.pop(strategies.index(ADV_DEEPFOOL))
     # strategies.pop(strategies.index(ADV_BIM))
     # strategies = [ENTROPY_D, ENTROPY, MARGIN_D, MARGIN, ]
     # strategies = KALS[::-1]
-    # strategies = [KAL_PLUS_DROP_DU]
     print("Strategies:", strategies)
     print("n_points", n_points, "n_iterations", n_iterations)
 
@@ -162,7 +162,7 @@ if __name__ == "__main__":
                                                             main_classes=main_classes)
             df_file = os.path.join(result_folder, f"metrics_{n_points}_points_"
                                                   f"{seed}_seed_{strategy}_strategy.pkl")
-            if os.path.exists(df_file) and load:
+            if os.path.exists(df_file) and load and KAL_PLUS not in strategy:
                 df = pd.read_pickle(df_file)
                 dfs.append(df)
                 auc = df['Accuracy'].mean()
@@ -175,7 +175,7 @@ if __name__ == "__main__":
                 "Iteration": [],
                 "Active Idx": [],
                 "Used Idx": [],
-                # "Predictions": [],
+                "Predictions": [],
                 "Accuracy": [],
                 "Supervision Loss": [],
                 "Active Loss": [],
@@ -188,6 +188,7 @@ if __name__ == "__main__":
             x_test, y_test = x_t[test_idx], y_t[test_idx]
             train_dataset = TensorDataset(x_train, y_train)
             test_dataset = TensorDataset(x_test, y_test)
+
             loss = torch.nn.BCEWithLogitsLoss(reduction="none")
             metric = F1()
 
@@ -226,7 +227,7 @@ if __name__ == "__main__":
                 df["Iteration"].append(it)
                 df["Active Idx"].append(active_idx.copy())
                 df["Used Idx"].append(used_idx.copy())
-                # df["Predictions"].append(preds_t.cpu().numpy())
+                df["Predictions"].append(preds_t.cpu().numpy())
                 df["Accuracy"].append(test_accuracy)
                 df["Supervision Loss"].append(sup_loss)
                 df["Active Loss"].append(active_loss.cpu().numpy())
@@ -255,7 +256,8 @@ if __name__ == "__main__":
             dfs.append(df)
 
     dfs = pd.concat(dfs)
-    dfs.to_pickle(f"{result_folder}\\metrics_{n_points}_points_{now}.pkl")
+    # dfs.to_pickle(f"{result_folder}\\metrics_{n_points}_points_{now}.pkl")
+    dfs.to_pickle(f"{result_folder}\\results.pkl")
 
     # %%
 

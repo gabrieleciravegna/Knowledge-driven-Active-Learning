@@ -8,14 +8,15 @@ import random
 # from torch.utils.data.dataset import TensorDataset
 # from kal.knowledge import KnowledgeLoss
 # from kal.network import MLP
+from kal.active_strategies import NAME_MAPPINGS
 
 
 def visualize_data_predictions(x_t: torch.Tensor, itr: int, act_strategy: str,
                                dataframe: pd.DataFrame, png_file: str = None,
-                               dimensions=None):
+                               dimensions=None, seed=0):
     if dimensions is None:
         dimensions = [0, 1]
-    dataframe = dataframe[dataframe["Seed"] == 0]
+    dataframe = dataframe[dataframe["Seed"] == seed]
     df_strategy = dataframe[dataframe["Strategy"] == act_strategy].reset_index()
     df_iteration = df_strategy[df_strategy['Iteration'] == itr]
 
@@ -28,26 +29,29 @@ def visualize_data_predictions(x_t: torch.Tensor, itr: int, act_strategy: str,
     x_0, x_1 = x_t.cpu().numpy()[train_idx, dimensions[0]], \
                x_t.cpu().numpy()[train_idx, dimensions[1]]
     preds = df_iteration["Predictions"].item()
-    multi_class = False
+    # multi_class = False
     if len(preds.shape) > 1:
-        preds = preds.argmax(axis=1)
-        multi_class = True
+        preds = preds[:, 0]
+        # multi_class = True
 
-    if multi_class:
-        new_idx = [2 if idx in a_idx else 1 if idx in u_idx else 0
-                   for idx in range(preds.shape[0])]
-        sns.scatterplot(x=x_0, y=x_1, hue=preds, style=new_idx)
-    else:
-        new_idx = [1 if idx in a_idx else 0 for idx in u_idx]
-        sns.scatterplot(x=x_0, y=x_1, hue=preds, legend=False)
-        sns.scatterplot(x=x_0[np.asarray(u_idx)], y=x_1[np.asarray(u_idx)],
-                        hue=new_idx, legend=False)
+    # if multi_class:
+    #     new_idx = [2 if idx in a_idx else 1 if idx in u_idx else 0
+    #                for idx in range(preds.shape[0])]
+    #     sns.scatterplot(x=x_0, y=x_1, hue=preds, style=new_idx)
+    # else:
+    new_idx = [1 if idx in a_idx else 0 for idx in u_idx]
+    sns.scatterplot(x=x_0, y=x_1, hue=preds, legend=False)
+    sns.scatterplot(x=x_0[np.asarray(u_idx)], y=x_1[np.asarray(u_idx)],
+                    hue=new_idx, legend=False)
     plt.axhline(0.5, 0, 1, c="k")
     plt.axvline(0.5, 0, 1, c="k")
-    plt.title(f"Points selected by {act_strategy}, iter {itr}, "
-              f"acc {acc:.2f}, n_points{n_points}")
-    plt.xlabel("$x^1$")
-    plt.ylabel("$x^2$")
+    # plt.title(f"Points selected by {act_strategy}, iter {itr}, "
+    #           f"acc {acc:.2f}, n_points{n_points}")
+    plt.title(f"{NAME_MAPPINGS[act_strategy]}", fontsize=36)
+    plt.xticks([0.0, 0.5, 1.0])
+    plt.yticks([0.0, 0.5, 1.0])
+    plt.xlabel("$x_1$")
+    plt.ylabel("$x_2$")
     sns.despine(left=True, bottom=True)
     plt.tight_layout()
     if png_file is not None:

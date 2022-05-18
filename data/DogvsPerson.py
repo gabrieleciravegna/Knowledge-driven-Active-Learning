@@ -13,7 +13,7 @@ from sortedcontainers import SortedSet
 from torch.utils.data import Dataset
 
 
-from pytorchyolo import xywh2xyxy_np
+from pytorchyolo.utils.utils import xywh2xyxy_np
 import vis_utils
 import my_utils
 
@@ -92,11 +92,11 @@ name_list = np.unique(np.asarray(name_list))
 name_ids = {name: i for i, name in enumerate(name_list)}
 
 bad_targets_idx = [
-    11,   20,   22,   29,   35,   46,   52,   60,   78,   79,   86,   95,
-    121,  131,  139,  144,  149,  154,  203,  204,  239,  263,  277,  279,
+    11,   20,   22,   29,   32, 35,   46,   52,   60,   78,   79,   86,   95,
+    121,  131,  139,  144,  149,  154,  203,  204,  213, 239,  263,  277,  279,
     284,  287,  295,  298,  303,  304,  316,  323,  329,  335,  341,  360,
     363,  367,  384,  408,  420,  484,  490,  540,  552,  561,  563,  564,
-    573,  584,  595,  627,  718,  730,  731,  734,  754,  761,  795,  812,
+    573,  584,  595,  627,  718,  730,  731,  734,  754,  761,  766, 795,  812,
     815,  829,  874,  941,  944,  946,  973,  985,  988,  989, 1001, 1009,
     1017, 1021, 1034, 1087, 1091, 1103, 1111, 1112, 1120, 1138, 1139, 1159,
     1166, 1215, 1219, 1224, 1225, 1230, 1251, 1260, 1263, 1281, 1283, 1285,
@@ -191,184 +191,184 @@ def create_dogvsperson_dataset(root_folder=".",
     orig_dir = os.path.abspath(os.curdir)
     os.chdir(root_folder)
 
-    # Check if folder exists and it is not empty
-    if override and os.path.exists(dataset_folder):
-        shutil.rmtree(dataset_folder)
-
-    if not os.path.exists(dataset_folder):
-        os.makedirs(dataset_folder)
-
+    # # Check if folder exists and it is not empty
+    # if override and os.path.exists(dataset_folder):
+    #     shutil.rmtree(dataset_folder)
+    #
+    # if not os.path.exists(dataset_folder):
+    #     os.makedirs(dataset_folder)
+    #
     os.chdir(dataset_folder)
-
-    # Check if labels already downloaded
-    if not os.path.exists(orig_label_folder):
-        if not os.path.exists(label_path):
-            download(label_url, label_path)
-            print("Labels Downloaded")
-        shutil.unpack_archive(label_path, "Labels")
-
-        # Cleaning label files
-        shutil.move(os.path.join("Labels", orig_label_folder), ".")
-        shutil.rmtree("Labels")
-    print("Labels extracted")
-
-    # Check if data already downloaded
-    if not os.path.exists(orig_image_folder):
-        if not os.path.exists(image_path):
-            download(image_url, image_path)
-            print("Images Downloaded")
-        shutil.unpack_archive(image_path, "Images")
-        shutil.move(os.path.join("Images", "VOCdevkit", "VOC2010",
-                                 orig_image_folder), orig_image_folder)
-        shutil.rmtree("Images")
-    print("Images extracted")
-
-    if not os.path.exists("classes.names"):
-        with open("classes.names", "w") as f:
-            for c in name_list:
-                f.write(f"{c}\n")
-    print("Class name file created")
-
-    # Creating object labels
-    print("Creating the labels...")
-
-    mask_per_class = {}
-    if not os.path.exists(label_folder) or \
-            not os.path.exists(image_folder) or \
-            len(os.listdir(label_folder)) < n_samples or \
-            len(os.listdir(image_folder)) < n_samples:
-
-        if os.path.exists(label_folder):
-            shutil.rmtree(label_folder)
-        if os.path.exists(image_folder):
-            shutil.rmtree(image_folder)
-
-        os.makedirs(label_folder)
-        os.makedirs(image_folder)
-
-        # Reading the mask
-        discarded = 0
-        idx = -1
-        areas = []
-        data_idx = sorted(os.listdir(orig_label_folder))
-        for filename in tqdm.tqdm(data_idx):
-            path = os.path.join(orig_label_folder, filename)
-            anno = io.loadmat(path)['anno'][0][0]
-            objs = anno[1][0]
-            masks = []
-            img_name = anno[0].item()
-            for obj in objs:
-                object_name = obj[0][0]
-                if object_name not in name_list:
-                    continue
-                object_id = name_ids[object_name]
-                if object_id == 0:
-                    object_id = class_zero
-                masks.append(obj[2] * object_id)
-                part_list = obj[3]
-                if len(part_list) > 0:
-                    for part in part_list[0]:
-                        part_name = part[0].item()
-                        if object_name == "person":
-                            part_name = person_mappings[part_name]
-                        elif object_name == "dog":
-                            part_name = dog_mappings[part_name]
-                        else:
-                            raise NotImplementedError()
-                        if part_name not in name_list:
-                            continue
-                        part_id = name_ids[part_name]
-                        masks.append(part[1] * part_id)
-
-            labels = []
-            for mask in masks:
-                pos = np.where(mask)
-                assert len(pos[0]) > 0, "Error in reading masks"
-
-                xmin = np.min(pos[1])
-                xmax = np.max(pos[1])
-                ymin = np.min(pos[0])
-                ymax = np.max(pos[0])
-
-                img_width = mask.shape[1]
-                img_height = mask.shape[0]
-                x_center = ((xmin + xmax) / 2) / img_width
-                y_center = ((ymin + ymax) / 2) / img_height
-                width = np.abs(xmax - xmin) / img_width
-                height = np.abs(ymax - ymin) / img_height
-                area = width * height
-
-                if area < 0.01:
-                    discarded += 1
-                    continue
-                areas.append(area)
-
-                class_idx = np.max(mask)
-                if class_idx == class_zero:
-                    class_idx = 0
-                name = name_list[class_idx]
-                if name in mask_per_class:
-                    mask_per_class[name] += 1
-                else:
-                    mask_per_class[name] = 1
-
-                assert 0 < x_center <= 1 and \
-                       0 < y_center <= 1 and \
-                       0 < width <= 1 and \
-                       0 < height <= 1, f"Error in creating mask " \
-                                        f"{x_center, y_center} {width, height}"
-                labels.append(f"{class_idx} {x_center} {y_center} {width} {height}")
-
-            # Check if any Person or Dog are present in the image, otherwise skip
-            if len(labels) == 0:
-                continue
-            else:
-                idx += 1
-
-            # Moving and renaming the images
-            orig_img_name = os.path.join(orig_image_folder, f"{img_name}.jpg")
-            img_name = os.path.join(image_folder, f"{idx:05d}.png")
-            l_path = os.path.join(label_folder, f"{idx:05d}.txt")
-            shutil.copy(orig_img_name, img_name)
-
-            # Writing the object detection label files
-            with open(l_path, "w") as f:
-                for label in labels:
-                    f.write(f"{label}\n")
-
-        # print(f"Discarding {discarded} label with small areas")
-        # areas = np.asarray(areas)
-        # logbins = np.geomspace(np.min(areas), np.max(areas), 12)
-        # plt.hist(areas, bins=logbins)
-        # plt.xscale("log")
-        # plt.savefig("Object areas distribution.png")
-        # plt.show()
-
-    else:
-        dataset = DogvsPersonDataset(".")
-        data_loader = torch.utils.data.DataLoader(dataset,
-                                                  collate_fn=vis_utils.collate_fn)
-        for _, target in data_loader:
-            class_idx = target[0]['labels']
-            for idx in class_idx:
-                # labels takes into account also the background, name_list does not
-                name = name_list[idx - 1]
-                if name in mask_per_class:
-                    mask_per_class[name] += 1
-                else:
-                    mask_per_class[name] = 1
-
-        mask_per_class = OrderedDict(sorted(mask_per_class.items()))
-        print(f"Masks distributions", mask_per_class)
-        plt.rcParams.update({'font.size': 12})
-        plt.bar(mask_per_class.keys(), mask_per_class.values())
-        plt.yscale("log")
-        plt.xticks(rotation=45, ha="right")
-        plt.tight_layout()
-        plt.ylim([8*10, 20*1000])
-        plt.savefig("Masks distributions per class.png")
-        plt.show()
-
+    #
+    # # Check if labels already downloaded
+    # if not os.path.exists(orig_label_folder):
+    #     if not os.path.exists(label_path):
+    #         download(label_url, label_path)
+    #         print("Labels Downloaded")
+    #     shutil.unpack_archive(label_path, "Labels")
+    #
+    #     # Cleaning label files
+    #     shutil.move(os.path.join("Labels", orig_label_folder), ".")
+    #     shutil.rmtree("Labels")
+    # print("Labels extracted")
+    #
+    # # Check if data already downloaded
+    # if not os.path.exists(orig_image_folder):
+    #     if not os.path.exists(image_path):
+    #         download(image_url, image_path)
+    #         print("Images Downloaded")
+    #     shutil.unpack_archive(image_path, "Images")
+    #     shutil.move(os.path.join("Images", "VOCdevkit", "VOC2010",
+    #                              orig_image_folder), orig_image_folder)
+    #     shutil.rmtree("Images")
+    # print("Images extracted")
+    #
+    # if not os.path.exists("classes.names"):
+    #     with open("classes.names", "w") as f:
+    #         for c in name_list:
+    #             f.write(f"{c}\n")
+    # print("Class name file created")
+    #
+    # # Creating object labels
+    # print("Creating the labels...")
+    #
+    # mask_per_class = {}
+    # if not os.path.exists(label_folder) or \
+    #         not os.path.exists(image_folder) or \
+    #         len(os.listdir(label_folder)) < n_samples or \
+    #         len(os.listdir(image_folder)) < n_samples:
+    #
+    #     if os.path.exists(label_folder):
+    #         shutil.rmtree(label_folder)
+    #     if os.path.exists(image_folder):
+    #         shutil.rmtree(image_folder)
+    #
+    #     os.makedirs(label_folder)
+    #     os.makedirs(image_folder)
+    #
+    #     # Reading the mask
+    #     discarded = 0
+    #     idx = -1
+    #     areas = []
+    #     data_idx = sorted(os.listdir(orig_label_folder))
+    #     for filename in tqdm.tqdm(data_idx):
+    #         path = os.path.join(orig_label_folder, filename)
+    #         anno = io.loadmat(path)['anno'][0][0]
+    #         objs = anno[1][0]
+    #         masks = []
+    #         img_name = anno[0].item()
+    #         for obj in objs:
+    #             object_name = obj[0][0]
+    #             if object_name not in name_list:
+    #                 continue
+    #             object_id = name_ids[object_name]
+    #             if object_id == 0:
+    #                 object_id = class_zero
+    #             masks.append(obj[2] * object_id)
+    #             part_list = obj[3]
+    #             if len(part_list) > 0:
+    #                 for part in part_list[0]:
+    #                     part_name = part[0].item()
+    #                     if object_name == "person":
+    #                         part_name = person_mappings[part_name]
+    #                     elif object_name == "dog":
+    #                         part_name = dog_mappings[part_name]
+    #                     else:
+    #                         raise NotImplementedError()
+    #                     if part_name not in name_list:
+    #                         continue
+    #                     part_id = name_ids[part_name]
+    #                     masks.append(part[1] * part_id)
+    #
+    #         labels = []
+    #         for mask in masks:
+    #             pos = np.where(mask)
+    #             assert len(pos[0]) > 0, "Error in reading masks"
+    #
+    #             xmin = np.min(pos[1])
+    #             xmax = np.max(pos[1])
+    #             ymin = np.min(pos[0])
+    #             ymax = np.max(pos[0])
+    #
+    #             img_width = mask.shape[1]
+    #             img_height = mask.shape[0]
+    #             x_center = ((xmin + xmax) / 2) / img_width
+    #             y_center = ((ymin + ymax) / 2) / img_height
+    #             width = np.abs(xmax - xmin) / img_width
+    #             height = np.abs(ymax - ymin) / img_height
+    #             area = width * height
+    #
+    #             if area < 0.01:
+    #                 discarded += 1
+    #                 continue
+    #             areas.append(area)
+    #
+    #             class_idx = np.max(mask)
+    #             if class_idx == class_zero:
+    #                 class_idx = 0
+    #             name = name_list[class_idx]
+    #             if name in mask_per_class:
+    #                 mask_per_class[name] += 1
+    #             else:
+    #                 mask_per_class[name] = 1
+    #
+    #             assert 0 < x_center <= 1 and \
+    #                    0 < y_center <= 1 and \
+    #                    0 < width <= 1 and \
+    #                    0 < height <= 1, f"Error in creating mask " \
+    #                                     f"{x_center, y_center} {width, height}"
+    #             labels.append(f"{class_idx} {x_center} {y_center} {width} {height}")
+    #
+    #         # Check if any Person or Dog are present in the image, otherwise skip
+    #         if len(labels) == 0:
+    #             continue
+    #         else:
+    #             idx += 1
+    #
+    #         # Moving and renaming the images
+    #         orig_img_name = os.path.join(orig_image_folder, f"{img_name}.jpg")
+    #         img_name = os.path.join(image_folder, f"{idx:05d}.png")
+    #         l_path = os.path.join(label_folder, f"{idx:05d}.txt")
+    #         shutil.copy(orig_img_name, img_name)
+    #
+    #         # Writing the object detection label files
+    #         with open(l_path, "w") as f:
+    #             for label in labels:
+    #                 f.write(f"{label}\n")
+    #
+    #     # print(f"Discarding {discarded} label with small areas")
+    #     # areas = np.asarray(areas)
+    #     # logbins = np.geomspace(np.min(areas), np.max(areas), 12)
+    #     # plt.hist(areas, bins=logbins)
+    #     # plt.xscale("log")
+    #     # plt.savefig("Object areas distribution.png")
+    #     # plt.show()
+    #
+    # else:
+    #     dataset = DogvsPersonDataset(".")
+    #     data_loader = torch.utils.data.DataLoader(dataset,
+    #                                               collate_fn=vis_utils.collate_fn)
+    #     for _, target in data_loader:
+    #         class_idx = target[0]['labels']
+    #         for idx in class_idx:
+    #             # labels takes into account also the background, name_list does not
+    #             name = name_list[idx - 1]
+    #             if name in mask_per_class:
+    #                 mask_per_class[name] += 1
+    #             else:
+    #                 mask_per_class[name] = 1
+    #
+    #     mask_per_class = OrderedDict(sorted(mask_per_class.items()))
+    #     print(f"Masks distributions", mask_per_class)
+    #     plt.rcParams.update({'font.size': 12})
+    #     plt.bar(mask_per_class.keys(), mask_per_class.values())
+    #     plt.yscale("log")
+    #     plt.xticks(rotation=45, ha="right")
+    #     plt.tight_layout()
+    #     plt.ylim([8*10, 20*1000])
+    #     plt.savefig("Masks distributions per class.png")
+    #     plt.show()
+    #
     create_train_test_split(train_idx, test_idx)
 
     create_data_config_file(config_file)

@@ -1,10 +1,13 @@
 from typing import Dict, Callable
 
+import seaborn as sns
+
 from .adv_bim import AdversarialBIMSampling
 from .adv_deepfool import AdversarialDeepFoolSampling
 from .entropy import EntropySampling, EntropyDropoutSampling
 from .kal_plus import KALPlusSampling, KALPlusSamplingSVM, KALPlusSamplingTree, KALPlusSamplingLOF, \
-    KALPlusUncDiversitySampling, KALPlusDiversitySampling, KALPlusUncSampling
+    KALPlusUncDiversitySampling, KALPlusDiversitySampling, KALPlusUncSampling, KALPlusDropSampling, \
+    KALPlusDropUncSampling, KALPlusDropDiversitySampling, KALPlusDropDiversityUncSampling
 from .random import RandomSampling
 from .strategy import Strategy
 from .supervised import SupervisedSampling
@@ -37,6 +40,14 @@ KAL_DROP = "KAL_DROP"
 KAL_DROP_U = "KAL_DROP_U"
 KAL_DROP_D = "KAL_DROP_D"
 KAL_DROP_DU = "KAL_DROP_DU"
+KAL_STAR = "KAL_STAR"
+KAL_STAR_D = "KAL_STAR_D"
+KAL_STAR_U = "KAL_STAR_U"
+KAL_STAR_DU = "KAL_STAR_DU"
+KAL_STAR_DROP = "KAL_STAR_DROP"
+KAL_STAR_DROP_D = "KAL_STAR_DROP_D"
+KAL_STAR_DROP_U = "KAL_STAR_DROP_U"
+KAL_STAR_DROP_DU = "KAL_STAR_DROP_DU"
 UNCERTAINTY = "Uncertainty"
 UNCERTAINTY_D = "Uncertainty_D"
 MARGIN = "Margin"
@@ -69,6 +80,8 @@ STRATEGIES = [
     # KAL_PLUS_DROP_U,
     # KAL_PLUS_DROP_D,
     # KAL_PLUS_DROP_DU,
+    KAL_STAR_DU,
+    KAL_STAR_DROP_DU,
     UNCERTAINTY,
     UNCERTAINTY_D,
     MARGIN,
@@ -78,7 +91,7 @@ STRATEGIES = [
     ENTROPY,
     ENTROPY_D,
     BALD,
-    BALD2,
+    # BALD2,
     ADV_BIM,
     ADV_DEEPFOOL,
 ]
@@ -101,6 +114,10 @@ DROPOUTS = [
     KAL_PLUS_DROP_U,
     KAL_PLUS_DROP_D,
     KAL_PLUS_DROP_DU,
+    KAL_STAR_DROP,
+    KAL_STAR_DROP_U,
+    KAL_STAR_DROP_D,
+    KAL_STAR_DROP_DU,
     ENTROPY_D,
     MARGIN_D,
     UNCERTAINTY_D,
@@ -135,21 +152,23 @@ SAMPLING_STRATEGIES: Dict[str, Callable[..., Strategy]] = {
     KAL_D: KALDiversitySampling,
     KAL_U: KALUncSampling,
     KAL_DU: KALDiversityUncSampling,
-    KAL_PLUS: KALPlusSampling,
-    KAL_PLUS_U: KALPlusUncSampling,
-    KAL_PLUS_D: KALPlusDiversitySampling,
-    KAL_PLUS_DU: KALPlusUncDiversitySampling,
-    KAL_PLUS_DROP: KALPlusSampling,
-    KAL_PLUS_DROP_U: KALPlusUncSampling,
-    KAL_PLUS_DROP_D: KALPlusDiversitySampling,
-    KAL_PLUS_DROP_DU: KALPlusUncDiversitySampling,
-    KAL_PLUS_SVM: KALPlusSamplingSVM,
-    KAL_PLUS_TREE: KALPlusSamplingTree,
-    KAL_PLUS_LOF: KALPlusSamplingLOF,
     KAL_DROP: KALDropSampling,
     KAL_DROP_U: KALDropUncSampling,
     KAL_DROP_D: KALDropDiversitySampling,
     KAL_DROP_DU: KALDropDiversityUncSampling,
+    KAL_STAR_DU: KALDiversityUncSampling,
+    KAL_STAR_DROP_DU: KALDropDiversityUncSampling,
+    KAL_PLUS: KALPlusSampling,
+    KAL_PLUS_U: KALPlusUncSampling,
+    KAL_PLUS_D: KALPlusDiversitySampling,
+    KAL_PLUS_DU: KALPlusUncDiversitySampling,
+    KAL_PLUS_DROP: KALPlusDropSampling,
+    KAL_PLUS_DROP_U: KALPlusDropUncSampling,
+    KAL_PLUS_DROP_D: KALPlusDropDiversitySampling,
+    KAL_PLUS_DROP_DU: KALPlusDropDiversityUncSampling,
+    KAL_PLUS_SVM: KALPlusSamplingSVM,
+    KAL_PLUS_TREE: KALPlusSamplingTree,
+    KAL_PLUS_LOF: KALPlusSamplingLOF,
     UNCERTAINTY: UncertaintySampling,
     UNCERTAINTY_D: UncertaintyDropoutSampling,
     MARGIN: MarginSampling,
@@ -170,12 +189,16 @@ NAME_MAPPINGS = {
     RANDOM: RANDOM,
     KAL_DU: "KAL",
     KAL_DROP_DU: "KAL$_D$",
+    KAL_PLUS_DU: "KAL$^+$",
+    KAL_PLUS_DROP_DU: "KAL$_D^+$",
+    KAL_STAR_DU: "KAL$_D^*$",
+    KAL_STAR_DROP_DU: "KAL$_D^*$",
     UNCERTAINTY: UNCERTAINTY,
     UNCERTAINTY_D: UNCERTAINTY+"$_D$",
     MARGIN: MARGIN,
     MARGIN_D: MARGIN+"$_D$",
-    KMEANS: "CoreSet$_{KMEANS}$",
-    KCENTER: "CoreSet$_{KCENTER}$",
+    KMEANS: "KMEANS",
+    KCENTER: "KCENTER",
     ENTROPY: ENTROPY,
     ENTROPY_D: ENTROPY+"$_D$",
     BALD: BALD,
@@ -190,16 +213,40 @@ NAME_MAPPINGS_LATEX = {
     RANDOM: RANDOM,
     KAL_DU: KAL,
     KAL_DROP_DU: KAL + "{\\tiny $_D$}",
+    KAL_PLUS_DU: KAL + "$^+$",
+    KAL_PLUS_DROP_DU: KAL + "{\\tiny $_D$}^+",
+    KAL_STAR_DU: "KAL$^*$",
+    KAL_STAR_DROP_DU: KAL + "{\\tiny %_D}^*$",
     UNCERTAINTY: UNCERTAINTY,
     UNCERTAINTY_D: UNCERTAINTY + "{\\tiny $_D$}",
     MARGIN: MARGIN,
     MARGIN_D: MARGIN + "{\\tiny $_D$}",
-    KMEANS: "CoreSet{\\tiny $_{KMEANS}$}",
-    KCENTER: "CoreSet{\\tiny $_{KCENTER}$}",
+    KMEANS: "KMEANS",
+    KCENTER: "KCENTER",
     ENTROPY: ENTROPY,
     ENTROPY_D: ENTROPY + "{\\tiny $_D$}",
     BALD: BALD,
     BALD2: BALD+"2",
     ADV_BIM: "ADV{\\tiny $_{BIM}$}",
     ADV_DEEPFOOL: "ADV{\\tiny $_{DEEPFOOL}$}",
+}
+
+
+colors = sns.color_palette()
+color_mappings = {
+    'Adv_BIM': colors[5],
+    'Adv_DeepFool': colors[5],
+    'BALD': colors[1],
+    'CoreSet_KCenter': colors[2],
+    'CoreSet_KMeans': colors[3],
+    'Entropy': colors[4],
+    'Entropy_D': colors[4],
+    'KAL_DU': colors[9],
+    'KAL_DROP_DU': colors[9],
+    'Margin': colors[6],
+    'Margin_D': colors[6],
+    'Random': colors[7],
+    'Supervised': colors[8],
+    'Uncertainty': colors[0],
+    'Uncertainty_D': colors[0],
 }

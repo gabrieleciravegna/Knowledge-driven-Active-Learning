@@ -40,23 +40,22 @@ if __name__ == "__main__":
     from tqdm import trange
     from sklearn.model_selection import StratifiedKFold
 
-    from kal.active_strategies import STRATEGIES, SAMPLING_STRATEGIES, ADV_DEEPFOOL, ADV_BIM, ENTROPY, ENTROPY_D, BALD, \
-    KALS, MARGIN, MARGIN_D, DROPOUTS, KAL_PLUS_DROP_DU, FAST_STRATEGIES, KMEANS, KCENTER, TO_RERUN
-    from kal.network import MLP, train_loop, evaluate, predict, predict_dropout
+    from kal.active_strategies import STRATEGIES, SAMPLING_STRATEGIES, DROPOUTS, KMEANS, KCENTER, TO_RERUN, \
+    NAME_MAPPINGS_LATEX, \
+    RANDOM, NAME_MAPPINGS
+    from kal.network import MLP, train_loop, evaluate, predict_dropout
     from kal.utils import visualize_active_vs_sup_loss, set_seed
 
-    from data.Cub200 import CUBDataset
     from data.Cifar100 import classes
     from kal.metrics import F1
-    from kal.knowledge import CUB200Loss
 
     plt.rc('animation', html='jshtml')
 
-    dataset = "cifar100"
-    model_folder = os.path.join("models", dataset)
-    result_folder = os.path.join("results", dataset)
-    image_folder = os.path.join("images", dataset)
-    data_folder = os.path.join("..", "data", dataset)
+    dataset_name = "cifar100"
+    model_folder = os.path.join("models", dataset_name)
+    result_folder = os.path.join("results", dataset_name)
+    image_folder = os.path.join("images", dataset_name)
+    data_folder = os.path.join("..", "data", dataset_name)
     assert os.path.isdir(data_folder), "Data not available in the required folder"
 
     if not os.path.isdir(model_folder):
@@ -170,7 +169,7 @@ if __name__ == "__main__":
 
             df_file = os.path.join(result_folder, f"metrics_{n_points}_points_"
                                                   f"{seed}_seed_{strategy}_strategy.pkl")
-            if os.path.exists(df_file) and load and strategy not in TO_RERUN:
+            if os.path.exists(df_file) and load:
                 df = pd.read_pickle(df_file)
                 if "Predictions" in df:
                     df.pop("Predictions")
@@ -279,35 +278,78 @@ if __name__ == "__main__":
     dfs = pd.read_pickle(os.path.join(f"{result_folder}",
                                       f"metrics_{n_points}_points_{now}.pkl"))
     dfs['Points'] = [len(used) for used in dfs['Used Idx']]
-    ours = [False if "KAL" in strategy else True for strategy in dfs['Strategy']]
+    ours = ["KAL" in strategy for strategy in dfs['Strategy']]
     dfs['Ours'] = ours
 
     dfs = dfs.sort_values(['Strategy', 'Seed', 'Iteration'])
     dfs = dfs.reset_index()
 
     rows = []
+    Strategies = []
     for i, row in dfs.iterrows():
         if row['Points'] > (n_points * n_iterations + first_points):
             dfs = dfs.drop(i)
+        else:
+            Strategies.append(NAME_MAPPINGS_LATEX[row['Strategy']])
+    dfs['Strategy'] = Strategies
 
-    dfs_auc = dfs.groupby("Strategy").mean()['Test Accuracy']
-    print(dfs_auc.to_latex())
+    aucs = []
+    dfs_auc_mean = dfs.groupby("Strategy").mean()['Test Accuracy'].tolist()
+    dfs_auc_std = dfs.groupby(["Strategy", "Seed"]).mean()['Test Accuracy'] \
+        .groupby("Strategy").std().tolist()
+    for mean, std in zip(dfs_auc_mean, dfs_auc_std):
+        auc = f"${mean:.2f}$ {{\\tiny $\\pm {std:.2f}$ }}"
+        aucs.append(auc)
+    df_auc = pd.DataFrame({
+        "Strategy": np.unique(Strategies),
+        "AUC": aucs,
+    }).set_index("Strategy")
+    print(df_auc.to_latex(float_format="%.2f", escape=False))
     with open(os.path.join(f"{result_folder}",
-                           f"auc_latex_{now}.txt"), "w") as f:
-        f.write(dfs_auc.to_latex())
+                           f"table_auc_latex_{now}.txt"), "w") as f:
+        f.write(df_auc.to_latex(float_format="%.2f", escape=False))
 
-    dfs_time = dfs.groupby("Strategy").mean()['Time']
-    print(dfs_time.to_latex())
+    final_accs = []
+    dfs_final_accs = dfs[dfs['Iteration'] == n_iterations - 1]
+    final_accs_mean = dfs_final_accs.groupby("Strategy").mean()['Test Accuracy'].tolist()
+    final_accs_std = dfs_final_accs.groupby("Strategy").std()['Test Accuracy'].tolist()
+    for mean, std in zip(final_accs_mean, final_accs_std):
+        final_acc = f"${mean:.2f}$ {{\\tiny $\\pm {std:.2f}$ }}"
+        final_accs.append(final_acc)
+    df_final_acc = pd.DataFrame({
+        "Strategy": np.unique(Strategies),
+        "Final F1": final_accs,
+    }).set_index("Strategy")
+    print(df_final_acc.to_latex(float_format="%.2f", escape=False))
     with open(os.path.join(f"{result_folder}",
-                           f"time_latex_{now}.txt"), "w") as f:
-        f.write(dfs_time.to_latex())
+                           f"table_final_acc_latex_{now}.txt"), "w") as f:
+        f.write(df_final_acc.to_latex(float_format="%.2f", escape=False))
+
+    times = []
+    dfs_time_mean = dfs.groupby("Strategy").mean()['Time']
+    base_time = dfs_time_mean[dfs_time_mean.index == RANDOM].item()
+    for time in dfs_time_mean.tolist():
+        time = time / base_time
+        time = time if time >= 1. else 1.
+        time = f"${time:.2f}$ x"
+        times.append(time)
+    df_times = pd.DataFrame({
+        "Strategy": np.unique(Strategies),
+        "Times": times
+    }).set_index("Strategy")
+    print(df_times.to_latex(float_format="%.2f", escape=False))
+    with open(os.path.join(f"{result_folder}",
+                           f"table_times_latex_{now}.txt"), "w") as f:
+        f.write(df_times.to_latex(float_format="%.2f", escape=False))
 
     # %%
 
     sns.set(style="whitegrid", font_scale=1.5,
             rc={'figure.figsize': (10, 8)})
-    sns.lineplot(data=dfs, x="Points", y='Test Accuracy',
-                 hue="Strategy", style="Ours", size="Ours", legend=False, ci=None)
+    sns.lineplot(data=dfs, x="Points", y="Test Accuracy",
+                 hue="Strategy", style="Ours", size="Ours",
+                 legend=False, ci=None, style_order=[1, 0],
+                 size_order=[1, 0], sizes=[4,2])
     sns.despine(left=True, bottom=True)
     plt.tight_layout()
     plt.ylabel("Accuracy")
@@ -315,8 +357,9 @@ if __name__ == "__main__":
     # plt.xlim([-10, 400])
     # plt.title("Comparison of the accuracies in the various strategy
     #            in function of the iterations")
-    plt.legend(title='Strategy', loc='lower right', labels=sorted(strategies))
-    plt.savefig(f"{image_folder}\\Accuracy_{n_points}_points_{now}.png",
+    labels = [NAME_MAPPINGS[strategy] for strategy in sorted(strategies)]
+    plt.legend(title='Strategy', loc='lower right', labels=labels)
+    plt.savefig(f"{image_folder}\\Accuracy_{dataset_name}_{n_points}_points_{now}.png",
                 dpi=200)
     plt.show()
 

@@ -1,4 +1,4 @@
-from typing import Tuple, Union
+from typing import Tuple, Union, Callable
 
 import numpy as np
 import torch
@@ -37,3 +37,19 @@ class KnowledgeLoss:
         assert loss_sum.min() >= 0.0, f"Error in calculating constraints, " \
                                       f"got negative loss {loss_sum.min()}"
 
+
+class CombinedLoss:
+    def __init__(self, k_loss: Callable[..., KnowledgeLoss], sup_loss=torch.nn.BCEWithLogitsLoss(),
+                 lambda_val: float = 0.1):
+        self.k_loss = k_loss(uncertainty=True)
+        self.sup_loss = sup_loss
+        self.lambda_val = lambda_val
+        self.sigmoid = torch.nn.Sigmoid()
+
+    def __call__(self, preds, *args, target=None, **kwargs):
+        assert target is not None
+        sup_loss = self.sup_loss(preds, target=target)
+        preds = self.sigmoid(preds)
+        k_loss = self.k_loss(preds, **kwargs)
+
+        return sup_loss + self.lambda_val * k_loss

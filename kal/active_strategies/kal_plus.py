@@ -16,7 +16,7 @@ from kal.knowledge import KnowledgeLoss, XORLoss, IrisLoss
 
 class KALPlusSampling(Strategy):
     def __init__(self, k_loss: Callable[..., KnowledgeLoss],
-                 detector_model: callable = OneClassSVM,
+                 detector_model: callable = LocalOutlierFactor,
                  uncertainty=False, **kwargs):
         super(KALPlusSampling, self).__init__()
         self.k_loss = k_loss(uncertainty=uncertainty)
@@ -180,6 +180,41 @@ class KALPlusUncDiversitySampling(KALPlusSampling):
     def __init__(self, *args, **kwargs):
         if "uncertainty" in kwargs:
             kwargs.pop("uncertainty")
+        super().__init__(*args, uncertainty=True, **kwargs)
+
+    def selection(self, *args, **kwargs) -> Tuple[List, torch.Tensor]:
+        if "diversity" in kwargs:
+            kwargs.pop("diversity")
+        return super().selection(*args, diversity=True, **kwargs)
+
+
+class KALPlusDropSampling(KALPlusSampling):
+
+    def loss(self, _, *args, preds_dropout=None, **kwargs) -> torch.Tensor:
+        assert preds_dropout is not None, "Need to pass predictions made with dropout to calculate this metric"
+
+        return super().loss(preds_dropout, *args, **kwargs)
+
+
+class KALPlusDropUncSampling(KALPlusDropSampling):
+    def __init__(self, *args, **kwargs):
+        if "uncertainty" in kwargs:
+            kwargs.pop("uncertainty.py")
+        super().__init__(*args, uncertainty=True, **kwargs)
+
+
+class KALPlusDropDiversitySampling(KALPlusDropSampling):
+
+    def selection(self, *args, **kwargs) -> Tuple[List, torch.Tensor]:
+        if "diversity" in kwargs:
+            kwargs.pop("diversity")
+        return super().selection(*args, diversity=True, **kwargs)
+
+
+class KALPlusDropDiversityUncSampling(KALPlusDropSampling):
+    def __init__(self, *args, **kwargs):
+        if "uncertainty" in kwargs:
+            kwargs.pop("uncertainty.py")
         super().__init__(*args, uncertainty=True, **kwargs)
 
     def selection(self, *args, **kwargs) -> Tuple[List, torch.Tensor]:

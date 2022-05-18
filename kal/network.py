@@ -11,6 +11,7 @@ from torchvision.models import ResNet
 from torchvision.models.resnet import BasicBlock, resnet18
 from tqdm import trange
 
+from kal.knowledge.knowledge_loss import CombinedLoss
 from kal.metrics import Metric, F1
 
 num_workers = 0
@@ -118,7 +119,10 @@ def train_loop(network: torch.nn.Module, data: TensorDataset, train_idx: List,
             input_data, labels = input_data.to(device), labels.to(device)
             optimizer.zero_grad()
             output, logits = network(input_data, return_logits=True)
-            s_l = loss(logits.squeeze(), labels)
+            if isinstance(loss, CombinedLoss):
+                s_l = loss(logits.squeeze(), target=labels, x=input_data)
+            else:
+                s_l = loss(logits.squeeze(), labels)
             # s_l[s_l > 1] /= 10  # may allow to avoid numerical problems
             s_l = s_l.mean()
             s_l.backward()
@@ -165,7 +169,7 @@ def predict(network, data: TensorDataset, batch_size=None, loss=None,
             p_t, logits = network(input_data, return_logits=True)
             preds.append(p_t.squeeze())
             if loss is not None:
-                l_val = loss(logits.squeeze(), labels)
+                l_val = loss(logits.squeeze(), target=labels)
                 if len(l_val.shape) > 1:
                     l_val = l_val.sum(dim=1)
                 losses += l_val.cpu().numpy().tolist()
