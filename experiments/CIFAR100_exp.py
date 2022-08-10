@@ -42,7 +42,7 @@ if __name__ == "__main__":
 
     from kal.active_strategies import STRATEGIES, SAMPLING_STRATEGIES, DROPOUTS, KMEANS, KCENTER, TO_RERUN, \
     NAME_MAPPINGS_LATEX, \
-    RANDOM, NAME_MAPPINGS
+    RANDOM, NAME_MAPPINGS, KALS
     from kal.network import MLP, train_loop, evaluate, predict_dropout
     from kal.utils import visualize_active_vs_sup_loss, set_seed
 
@@ -94,6 +94,7 @@ if __name__ == "__main__":
     strategies = STRATEGIES[::-1][2:]
     strategies.pop(strategies.index(KCENTER))
     strategies.pop(strategies.index(KMEANS))
+    strategies = KALS
     # strategies = FAST_STRATEGIES
     # strategies = [ENTROPY_D, ENTROPY, MARGIN_D, MARGIN, ]
     # strategies = KALS[::-1]
@@ -349,7 +350,7 @@ if __name__ == "__main__":
     sns.lineplot(data=dfs, x="Points", y="Test Accuracy",
                  hue="Strategy", style="Ours", size="Ours",
                  legend=False, ci=None, style_order=[1, 0],
-                 size_order=[1, 0], sizes=[4,2])
+                 size_order=[1, 0], sizes=[4, 2])
     sns.despine(left=True, bottom=True)
     plt.tight_layout()
     plt.ylabel("Accuracy")

@@ -31,16 +31,16 @@ if __name__ == "__main__":
 
     from kal.active_strategies import STRATEGIES, SAMPLING_STRATEGIES, ENTROPY_D, ENTROPY, ADV_DEEPFOOL, ADV_BIM, BALD, \
     KAL_PLUS, KALS, UNCERTAINTY_D, MARGIN_D, DROPOUTS, KCENTER, NAME_MAPPINGS, RANDOM, NAME_MAPPINGS_LATEX, BALD2, \
-    KAL_DU, MARGIN, KAL_U, KAL_STAR_DROP_DU, KAL_STAR_DU
-    from kal.knowledge.xor import XORLoss, steep_sigmoid
+    KAL_DU, MARGIN, KAL_U, KAL_STAR_DROP_DU, KAL_STAR_DU, RandomSampling
+    from kal.knowledge.xor import XORLoss, steep_sigmoid, Losses
     from kal.metrics import MultiLabelAccuracy, F1
-    from kal.network import MLP, train_loop, evaluate, predict_dropout, predict
+    from kal.network import MLP, train_loop, evaluate, predict_dropout, predict, ELEN
     from kal.utils import visualize_data_predictions, set_seed
 
     plt.rc('animation', html='jshtml')
     plt.close('all')
 
-    dataset_name = "xor"
+    dataset_name = "xor_len"
     model_folder = os.path.join("models", dataset_name)
     result_folder = os.path.join("results", dataset_name)
     image_folder = os.path.join("images", dataset_name)
@@ -59,17 +59,15 @@ if __name__ == "__main__":
     print(f"Working on {dev}")
 
     KLoss = XORLoss
-    # strategies = [BALD, ENTROPY, ENTROPY_D]
-    strategies = STRATEGIES
-    # strategies = KALS
-    # strategies.pop(strategies.index(KCENTER))
-    # strategies = KALS
+    # strategies = STRATEGIES
+    strategies = [KAL_DU]
+
 
     # %% md
     #### Generating and visualizing data for the xor problem
     # %%
 
-    load = True
+    load = False
     tot_points = 100000
     first_points = 10
     n_points = 5
@@ -84,7 +82,9 @@ if __name__ == "__main__":
     y_t = (((x_t[:, 0] > 0.5) & (x_t[:, 1] < 0.5)) |
            ((x_t[:, 1] > 0.5) & (x_t[:, 0] < 0.5))
            ).float().to(dev)
-    y_multi_t = torch.stack((y_t, 1 - y_t), dim=1)
+    y_multi_t = torch.stack((1 - y_t, y_t), dim=1)
+
+    assert (y_multi_t.argmax(dim=1) == y_t).all(), "Error in computing y multi label"
 
     # sns.scatterplot(x=x_t[:, 0].numpy(), y=x_t[:, 1].numpy(), hue=y_t.numpy())
     # plt.savefig(f"{image_folder}\\data_labelling.png")
@@ -134,7 +134,6 @@ if __name__ == "__main__":
         print("First idx", first_idx)
 
         for strategy in strategies:
-            active_strategy = SAMPLING_STRATEGIES[strategy](k_loss=KLoss, main_classes=[0, 1])
             df_file = os.path.join(result_folder, f"metrics_{n_points}_points_"
                                                   f"{seed}_seed_{strategy}_strategy.pkl")
             if os.path.exists(df_file) and load:
@@ -162,14 +161,14 @@ if __name__ == "__main__":
                 "Test Idx": []
             }
 
-            if strategy in [ADV_DEEPFOOL, ADV_BIM, ENTROPY, ENTROPY_D, BALD]:
-                num_classes = 2
-                x_train, y_train = x_t[train_idx], y_multi_t[train_idx]
-                x_test, y_test = x_t[test_idx], y_multi_t[test_idx]
-            else:
-                num_classes = 1
-                x_train, y_train = x_t[train_idx], y_t[train_idx]
-                x_test, y_test = x_t[test_idx], y_t[test_idx]
+            # if strategy in [ADV_DEEPFOOL, ADV_BIM, ENTROPY, ENTROPY_D, BALD]:
+            num_classes = 2
+            x_train, y_train = x_t[train_idx], y_multi_t[train_idx]
+            x_test, y_test = x_t[test_idx], y_multi_t[test_idx]
+            # else:
+            #     num_classes = 1
+            #     x_train, y_train = x_t[train_idx], y_t[train_idx]
+            #     x_test, y_test = x_t[test_idx], y_t[test_idx]
 
             train_dataset = TensorDataset(x_train, y_train)
             test_dataset = TensorDataset(x_test, y_test)
@@ -180,8 +179,9 @@ if __name__ == "__main__":
             metric = F1()
 
             set_seed(0)
-            net = MLP(input_size=input_size, hidden_size=hidden_size,
-                      n_classes=num_classes, dropout=True).to(dev)
+            net = MLP(num_classes, input_size, hidden_size, dropout=True).to(dev)
+            expl = ELEN(input_size=input_size, hidden_size=hidden_size,
+                        n_classes=num_classes, dropout=True).to(dev)
 
             # first training with few randomly selected data
             losses = []
@@ -203,12 +203,20 @@ if __name__ == "__main__":
                 test_accuracy, sup_loss = evaluate(net, test_dataset, metric=metric,
                                                    loss=torch.nn.BCEWithLogitsLoss(reduction="none")
                                                    )
+                train_loop(expl, train_dataset, used_idx, epochs,
+                           lr=lr, loss=loss, visualize_loss=False)
+                formula = expl.explain(x_t, y_multi_t, used_idx, feat_names=["X1", "X2"])
+                KLoss = Losses[formula]
 
+                active_strategy = SAMPLING_STRATEGIES[strategy](k_loss=KLoss, main_classes=[0, 1])
                 active_idx, active_loss = active_strategy.selection(preds_t, used_idx,
-                                                                    n_points, x=x_t[train_idx],
+                                                                    n_points-2, x=x_t[train_idx],
                                                                     labels=y_t[train_idx],
                                                                     preds_dropout=preds_dropout,
                                                                     clf=net, dataset=train_dataset)
+                rand_idx, rand_loss = RandomSampling().selection(preds_t, used_idx, 2)
+                active_idx += rand_idx
+
                 used_idx += active_idx
 
                 df["Strategy"].append(strategy)
@@ -227,6 +235,7 @@ if __name__ == "__main__":
                 assert isinstance(used_idx, list), "Error"
 
                 pbar.set_description(f"{strategy} {seed + 1}/{seeds}, "
+                                     f"expl: {formula}, "
                                      f"auc: {np.mean(df['Accuracy']):.2f}, "
                                      f"s_l: {mean(sup_loss):.2f}, "
                                      f"l: {losses[-1]:.2f}, p: {len(used_idx)}")

@@ -7,12 +7,12 @@ from . import KnowledgeLoss
 
 
 class DogvsPersonLoss(KnowledgeLoss):
-    def __init__(self, names=None, scale="a", mu=1):
+    def __init__(self, names=None, scale=None, mu=1, **kwargs):
         super().__init__(names)
         self.scale = scale
         self.mu = mu
 
-    def __call__(self, output, return_arg_max=False, targets=False) \
+    def __call__(self, output, return_arg_max=False, targets=False, **kwargs) \
             -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
 
         Dog = output[:, 0]

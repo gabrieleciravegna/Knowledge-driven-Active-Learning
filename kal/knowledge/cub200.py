@@ -8,7 +8,7 @@ from . import KnowledgeLoss
 
 class CUB200Loss(KnowledgeLoss):
     def __init__(self, main_classes: list, attributes: list, combinations: list,
-                 names=None, uncertainty=False):
+                 names=None, uncertainty=False, percentage=None):
 
         super().__init__(names)
         self.uncertainty = uncertainty
@@ -16,6 +16,7 @@ class CUB200Loss(KnowledgeLoss):
         self.attributes = attributes
         self.combinations = combinations
         self.mu = 1.
+        self.percentage = percentage
 
     def __call__(self, output, targets=False, return_argmax=False, return_losses=False) \
             -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
@@ -63,6 +64,11 @@ class CUB200Loss(KnowledgeLoss):
             loss_fol_product_tnorm.append(unc_loss)
 
         losses = torch.stack(loss_fol_product_tnorm, dim=1)
+
+        if self.percentage is not None:
+            n_rules = losses.shape[1] * self.percentage // 100
+            losses = losses[:, :n_rules]
+
         arg_max = torch.argmax(losses, dim=1)
 
         # losses = torch.sum(losses, dim=1)

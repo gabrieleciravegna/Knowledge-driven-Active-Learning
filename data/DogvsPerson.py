@@ -13,9 +13,9 @@ from sortedcontainers import SortedSet
 from torch.utils.data import Dataset
 
 
-from pytorchyolo.utils.utils import xywh2xyxy_np
-import vis_utils
-import my_utils
+from kal.vision_utils.pytorchyolo.utils.utils import xywh2xyxy_np
+import kal.vision_utils.vis_utils as vis_utils
+import kal.vision_utils.my_utils as my_utils
 
 
 def download(url, file_path):
@@ -147,12 +147,12 @@ class_zero = 11111
 
 
 def create_data_config_file(file: str):
-    if not os.path.exists(file):
-        with open(file, "w") as f:
-            f.write(f"classes={n_classes}\n")
-            f.write(f"train={os.path.join('data', dataset_folder, 'train.txt')}\n")
-            f.write(f"valid={os.path.join('data', dataset_folder, 'test.txt')}\n")
-            f.write(f"names={os.path.join('data', dataset_folder, 'classes.names')}\n")
+    # if not os.path.exists(file):
+    with open(file, "w") as f:
+        f.write(f"classes={n_classes}\n")
+        f.write(f"train={os.path.join('..', 'data', dataset_folder, 'train.txt')}\n")
+        f.write(f"valid={os.path.join('..', 'data', dataset_folder, 'test.txt')}\n")
+        f.write(f"names={os.path.join('..', 'data', dataset_folder, 'classes.names')}\n")
 
 
 def create_train_test_split(train_idx=None, test_idx=None, root="."):
@@ -178,7 +178,7 @@ def create_train_test_split(train_idx=None, test_idx=None, root="."):
         file = f"{split}.txt"
         with open(file, "w") as f:
             for file in split_files:
-                img_path = os.path.join("data", dataset_folder, "images", f"{file}")
+                img_path = os.path.join("..", "data", dataset_folder, "images", f"{file}")
                 f.write(f"{img_path}\n")
     print("Train test files created")
 

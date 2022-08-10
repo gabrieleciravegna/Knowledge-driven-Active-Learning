@@ -38,10 +38,9 @@ if __name__ == "__main__":
     from tqdm import trange
     from sklearn.model_selection import StratifiedKFold
 
-    from kal.active_strategies import STRATEGIES, SAMPLING_STRATEGIES, ADV_DEEPFOOL, ADV_BIM, ENTROPY, ENTROPY_D, BALD, \
-    KALS, MARGIN, MARGIN_D, DROPOUTS, KAL_PLUS_DROP_DU, FAST_STRATEGIES, KMEANS, TO_RERUN, RANDOM, NAME_MAPPINGS, \
+    from kal.active_strategies import STRATEGIES, SAMPLING_STRATEGIES, KALS, DROPOUTS, RANDOM, NAME_MAPPINGS, \
     NAME_MAPPINGS_LATEX
-    from kal.network import MLP, train_loop, evaluate, predict, predict_dropout
+    from kal.network import MLP, train_loop, evaluate, predict_dropout
     from kal.utils import visualize_active_vs_sup_loss, set_seed
 
     from data.Cub200 import CUBDataset
@@ -91,6 +90,7 @@ if __name__ == "__main__":
     load = True
 
     strategies = STRATEGIES[:-1]
+    strategies = KALS[::-1]
     # strategies = FAST_STRATEGIES
     # strategies = [ENTROPY_D, ENTROPY, MARGIN_D, MARGIN, ]
     # strategies = KALS[::-1]
@@ -165,11 +165,20 @@ if __name__ == "__main__":
         # if seed > 3:
         #     break
         for strategy in strategies:
+            if "25" in strategy or "50" in strategy or "75" in strategy:
+                percentage = int(strategy[-2:])
+            else:
+                percentage = None
+            KLoss = partial(CUB200Loss, main_classes=dataset.main_classes,
+                            attributes=dataset.attributes,
+                            combinations=dataset.class_attr_comb,
+                            percentage=percentage
+                            )
             active_strategy = SAMPLING_STRATEGIES[strategy](k_loss=KLoss, main_classes=dataset.main_classes)
 
             df_file = os.path.join(result_folder, f"metrics_{n_points}_points_"
                                                   f"{seed}_seed_{strategy}_strategy.pkl")
-            if os.path.exists(df_file) and load:
+            if os.path.exists(df_file) and load and "+" not in strategy:
                 df = pd.read_pickle(df_file)
                 dfs.append(df)
                 auc = df['Test Accuracy'].mean()

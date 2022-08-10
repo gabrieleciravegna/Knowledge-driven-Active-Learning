@@ -13,7 +13,7 @@ from kal.active_strategies import NAME_MAPPINGS
 
 def visualize_data_predictions(x_t: torch.Tensor, itr: int, act_strategy: str,
                                dataframe: pd.DataFrame, png_file: str = None,
-                               dimensions=None, seed=0):
+                               dimensions=None, seed=0, dataset="xor"):
     if dimensions is None:
         dimensions = [0, 1]
     dataframe = dataframe[dataframe["Seed"] == seed]
@@ -29,20 +29,25 @@ def visualize_data_predictions(x_t: torch.Tensor, itr: int, act_strategy: str,
     x_0, x_1 = x_t.cpu().numpy()[train_idx, dimensions[0]], \
                x_t.cpu().numpy()[train_idx, dimensions[1]]
     preds = df_iteration["Predictions"].item()
-    # multi_class = False
-    if len(preds.shape) > 1:
-        preds = preds[:, 0]
-        # multi_class = True
 
-    # if multi_class:
-    #     new_idx = [2 if idx in a_idx else 1 if idx in u_idx else 0
-    #                for idx in range(preds.shape[0])]
-    #     sns.scatterplot(x=x_0, y=x_1, hue=preds, style=new_idx)
-    # else:
-    new_idx = [1 if idx in a_idx else 0 for idx in u_idx]
-    sns.scatterplot(x=x_0, y=x_1, hue=preds, legend=False)
-    sns.scatterplot(x=x_0[np.asarray(u_idx)], y=x_1[np.asarray(u_idx)],
-                    hue=new_idx, legend=False)
+    # multi_class = False
+    if dataset == "xor":
+        if len(preds.shape) > 1:
+            preds = preds[:, 0]
+        new_idx = [1 if idx in a_idx else 0 for idx in u_idx]
+        sns.scatterplot(x=x_0, y=x_1, hue=preds, legend=False)
+        sns.scatterplot(x=x_0[np.asarray(u_idx)], y=x_1[np.asarray(u_idx)],
+                        hue=new_idx, legend=False)
+        plt.xlabel("$x_1$")
+        plt.ylabel("$x_2$")
+    else:
+        preds = np.argmax(preds, axis=1)
+        new_idx = [2 if idx in a_idx else 1 if idx in u_idx else 0
+                   for idx in range(preds.shape[0])]
+        sns.scatterplot(x=x_0, y=x_1, hue=preds, style=new_idx, markers=['o', 'X', 'D',])
+        plt.xlabel("$Petal Length$")
+        plt.ylabel("$petal Width$")
+
     plt.axhline(0.5, 0, 1, c="k")
     plt.axvline(0.5, 0, 1, c="k")
     # plt.title(f"Points selected by {act_strategy}, iter {itr}, "
@@ -50,14 +55,11 @@ def visualize_data_predictions(x_t: torch.Tensor, itr: int, act_strategy: str,
     plt.title(f"{NAME_MAPPINGS[act_strategy]}", fontsize=36)
     plt.xticks([0.0, 0.5, 1.0])
     plt.yticks([0.0, 0.5, 1.0])
-    plt.xlabel("$x_1$")
-    plt.ylabel("$x_2$")
     sns.despine(left=True, bottom=True)
     plt.tight_layout()
     if png_file is not None:
         plt.savefig(png_file)
     plt.show()
-
 
 def visualize_active_vs_sup_loss(i, active_strategy, dataframe, png_file: str = None,
                                  lin_regression=False):
