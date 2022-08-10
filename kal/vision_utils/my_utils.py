@@ -8,7 +8,7 @@ from torch import nn, Tensor
 from torchvision import transforms
 from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
 
-import transforms as T
+from . import transforms as T
 
 
 def xywhn2xyxy(x, w=640, h=640, padw=0, padh=0):

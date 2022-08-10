@@ -7,9 +7,12 @@ import torch
 import torch.nn.functional as F
 from torch import Tensor
 from torch.utils.data import DataLoader, TensorDataset, Subset
+from torch_explain.logic import replace_names
 from torchvision.models import ResNet
 from torchvision.models.resnet import BasicBlock, resnet18
 from tqdm import trange
+from torch_explain.nn import EntropyLinear
+from torch_explain.logic.nn.entropy import explain_class
 
 from kal.knowledge.knowledge_loss import CombinedLoss
 from kal.metrics import Metric, F1
@@ -92,6 +95,34 @@ class MLP(torch.nn.Module):
         return output
 
 
+class ELEN(MLP):
+    def __init__(self, *args, **kwargs):
+        super(ELEN, self).__init__(*args, **kwargs)
+        self.fc1 = EntropyLinear(self.input_size, self.hidden_size, self.n_classes)
+        self.fc2 = torch.nn.Linear(self.hidden_size, 1)
+
+    def forward(self, input_x: torch.Tensor, return_logits=False) -> Union[Tuple[Tensor, Tensor], Tensor]:
+        hidden = self.fc1(input_x)
+        relu = self.relu(hidden)
+
+        if self.dropout:
+            dropout = F.dropout(relu, p=self.dropout_rate)
+        else:
+            dropout = relu
+        logits = self.fc2(dropout).squeeze(-1)
+        output = self.activation(logits)
+
+        if return_logits:
+            return output, logits
+        return output
+
+    def explain(self, x, y, train_idx, feat_names):
+        expl = explain_class(self, x, y, train_idx, train_idx, target_class=1, topk_explanations=5,
+                             y_threshold=0.5)[0]
+        expl = replace_names(expl, feat_names)
+        return expl
+
+
 def train_loop(network: torch.nn.Module, data: TensorDataset, train_idx: List,
                epochs: int = 100, batch_size=None, lr=1e-2,
                loss=torch.nn.BCEWithLogitsLoss(reduction="none"),
@@ -100,11 +131,11 @@ def train_loop(network: torch.nn.Module, data: TensorDataset, train_idx: List,
         -> List[Tensor]:
 
     network.to(device)
-    train_idx = np.asarray(train_idx)
+    train_idx = np.asarray(train_idx, dtype=int)
     train_data = Subset(data, train_idx)
 
     if batch_size is None:
-        data_loader = [[tensor[train_data.indices]
+        data_loader = [[tensor[train_data.indices, :]
                         for tensor in train_data.dataset.tensors]]
     else:
         data_loader = DataLoader(train_data, batch_size=batch_size, pin_memory=True,

@@ -61,6 +61,10 @@ BALD2 = "BALD2"
 ADV_DEEPFOOL = "Adv_DeepFool"
 ADV_BIM = "Adv_BIM"
 
+KAL_25 = "KAL_25"
+KAL_50 = "KAL_50"
+KAL_75 = "KAL_75"
+
 STRATEGIES = [
     SUPERVISED,
     RANDOM,
@@ -80,8 +84,8 @@ STRATEGIES = [
     # KAL_PLUS_DROP_U,
     # KAL_PLUS_DROP_D,
     # KAL_PLUS_DROP_DU,
-    KAL_STAR_DU,
-    KAL_STAR_DROP_DU,
+    # KAL_STAR_DU,
+    # KAL_STAR_DROP_DU,
     UNCERTAINTY,
     UNCERTAINTY_D,
     MARGIN,
@@ -123,26 +127,31 @@ DROPOUTS = [
     UNCERTAINTY_D,
 ]
 
-
-TO_RERUN = DROPOUTS + [ENTROPY, BALD, BALD2]
-
 KALS = [
-    KAL_PLUS_DROP_DU,
-    KAL_PLUS_DROP,
-    KAL_PLUS_DROP_U,
-    KAL_PLUS_DROP_D,
-    KAL_PLUS_DU,
+    KAL,
+    KAL_D,
+    KAL_U,
+    KAL_DU,
+    KAL_DROP,
+    KAL_DROP_D,
+    KAL_DROP_U,
+    KAL_DROP_DU,
     KAL_PLUS,
     KAL_PLUS_U,
     KAL_PLUS_D,
-    KAL,
-    KAL_U,
-    KAL_D,
-    KAL_DU,
-    KAL_DROP,
-    KAL_DROP_U,
-    KAL_DROP_D,
-    KAL_DROP_DU,
+    KAL_PLUS_DU,
+    KAL_PLUS_DROP,
+    KAL_PLUS_DROP_U,
+    KAL_PLUS_DROP_D,
+    KAL_PLUS_DROP_DU,
+    KAL_25,
+    KAL_50,
+    KAL_75,
+]
+
+KAL_STARS = [
+    KAL_STAR_DU,
+    KAL_STAR_DROP_DU
 ]
 
 SAMPLING_STRATEGIES: Dict[str, Callable[..., Strategy]] = {
@@ -180,21 +189,45 @@ SAMPLING_STRATEGIES: Dict[str, Callable[..., Strategy]] = {
     BALD: BALDSampling,
     BALD2: BALDSampling2,
     ADV_DEEPFOOL: AdversarialDeepFoolSampling,
-    ADV_BIM: AdversarialBIMSampling
+    ADV_BIM: AdversarialBIMSampling,
+    KAL_25: KALSampling,
+    KAL_50: KALSampling,
+    KAL_75: KALSampling,
 }
 
+NAME_MAPPINGS_ABLATION_STUDY = {
+    KAL: "KAL",
+    KAL_25: "KAL 25\%",
+    KAL_50: "KAL 50\%",
+    KAL_75: "KAL 75\%",
+    KAL_D: "KAL Div",
+    KAL_U: "KAL Unc",
+    KAL_DU: "KAL Div Unc",
+    KAL_DROP: "KAL$_D$",
+    KAL_DROP_D: "KAL$_D$ Div",
+    KAL_DROP_U: "KAL$_D$ Unc",
+    KAL_DROP_DU: "KAL$_D$ Div Unc",
+    KAL_PLUS: "KAL$^+$",
+    KAL_PLUS_D: "KAL$^+$ Div",
+    KAL_PLUS_U: "KAL$^+$ Unc",
+    KAL_PLUS_DU: "KAL$^+$ Div Unc",
+    KAL_PLUS_DROP: "KAL$_D^+$",
+    KAL_PLUS_DROP_D: "KAL$_D^+$ Div",
+    KAL_PLUS_DROP_U: "KAL$_D^+$ Unc",
+    KAL_PLUS_DROP_DU: "KAL$_D^+$ Div Unc",
+}
 
 NAME_MAPPINGS = {
-    SUPERVISED: SUPERVISED,
+    SUPERVISED: "SupLoss",
     RANDOM: RANDOM,
     KAL_DU: "KAL",
     KAL_DROP_DU: "KAL$_D$",
     KAL_PLUS_DU: "KAL$^+$",
     KAL_PLUS_DROP_DU: "KAL$_D^+$",
-    KAL_STAR_DU: "KAL$_D^*$",
+    KAL_STAR_DU: "KAL$^*$",
     KAL_STAR_DROP_DU: "KAL$_D^*$",
-    UNCERTAINTY: UNCERTAINTY,
-    UNCERTAINTY_D: UNCERTAINTY+"$_D$",
+    UNCERTAINTY: "LeastConf",
+    UNCERTAINTY_D: "LeastConf"+"$_D$",
     MARGIN: MARGIN,
     MARGIN_D: MARGIN+"$_D$",
     KMEANS: "KMEANS",
@@ -241,12 +274,14 @@ color_mappings = {
     'CoreSet_KMeans': colors[3],
     'Entropy': colors[4],
     'Entropy_D': colors[4],
+    'KAL': colors[9],
     'KAL_DU': colors[9],
     'KAL_DROP_DU': colors[9],
     'Margin': colors[6],
     'Margin_D': colors[6],
     'Random': colors[7],
     'Supervised': colors[8],
+    'SupLoss': colors[8],
     'Uncertainty': colors[0],
     'Uncertainty_D': colors[0],
 }

@@ -16,7 +16,7 @@ from kal.knowledge import KnowledgeLoss, XORLoss, IrisLoss
 
 class KALPlusSampling(Strategy):
     def __init__(self, k_loss: Callable[..., KnowledgeLoss],
-                 detector_model: callable = LocalOutlierFactor,
+                 detector_model: callable = OneClassSVM,
                  uncertainty=False, **kwargs):
         super(KALPlusSampling, self).__init__()
         self.k_loss = k_loss(uncertainty=uncertainty)

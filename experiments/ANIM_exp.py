@@ -90,6 +90,7 @@ if __name__ == "__main__":
     # strategies.pop(strategies.index(ADV_BIM))
     # strategies = [ENTROPY_D, ENTROPY, MARGIN_D, MARGIN, ]
     # strategies = KALS[::-1]
+    strategies = KALS
     print("Strategies:", strategies)
     print("n_points", n_points, "n_iterations", n_iterations)
 
