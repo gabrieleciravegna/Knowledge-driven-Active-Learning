@@ -20,6 +20,8 @@ class IrisLoss(KnowledgeLoss):
 
     def __call__(self, output: torch.Tensor, x: torch.Tensor = None, return_argmax=False, return_losses=False) \
             -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
+        assert x is not None, "Must pass input data to compute " \
+                              "the rule violation loss on this dataset"
 
         # ~petal_length <=> f1
         # ~petal_length => f1

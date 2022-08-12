@@ -1,3 +1,4 @@
+from active_strategies import RandomSampling
 
 if __name__ == "__main__":
 
@@ -13,9 +14,17 @@ if __name__ == "__main__":
     import datetime
     import random
     import time
+    from functools import partial
     from statistics import mean
 
-    from sklearn.model_selection import StratifiedKFold
+    from sklearn import tree
+    from sklearn.datasets import load_iris
+    from sklearn.metrics import f1_score
+    from sklearn.model_selection import train_test_split, StratifiedKFold
+    from sklearn.preprocessing import MinMaxScaler, OneHotEncoder
+
+    from kal.knowledge import IrisLoss
+    from kal.utils import visualize_data_predictions, set_seed
 
     import matplotlib.pyplot as plt
     import numpy as np
@@ -28,17 +37,15 @@ if __name__ == "__main__":
 
     from knowledge.expl_to_loss import Expl_2_Loss
 
-    from kal.active_strategies import STRATEGIES, SAMPLING_STRATEGIES, ENTROPY_D, ENTROPY, ADV_DEEPFOOL, ADV_BIM, BALD, \
-    KALS, DROPOUTS, RandomSampling, KAL_LEN_DROP_DU, KAL_LEN_DU, KAL_DU
+    from kal.active_strategies import SAMPLING_STRATEGIES, DROPOUTS, KAL_LEN_DU
     from kal.knowledge.xor import XORLoss, steep_sigmoid
     from kal.metrics import F1
     from kal.network import MLP, train_loop, evaluate, predict_dropout, predict, ELEN
-    from kal.utils import visualize_data_predictions, set_seed
 
     plt.rc('animation', html='jshtml')
     plt.close('all')
 
-    dataset_name = "xor_len"
+    dataset_name = "iris"
     model_folder = os.path.join("models", dataset_name)
     result_folder = os.path.join("results", dataset_name)
     image_folder = os.path.join("images", dataset_name)
@@ -56,94 +63,111 @@ if __name__ == "__main__":
     dev = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
     print(f"Working on {dev}")
 
-    # strategies = STRATEGIES
-    strategies = [KAL_LEN_DU]
-
-
     # %% md
-    #### Generating and visualizing data for the xor problem
+
+    #### Loading data for the IRIS dataset
+
     # %%
 
-    load = False
-    tot_points = 100000
-    first_points = 10
+    iris_dataset = load_iris()
+    X = iris_dataset.data
+    Y = iris_dataset.target
+    feat_names = iris_dataset.feature_names
+    class_names = iris_dataset.target_names
+    print("Class names", class_names, "Feat names", feat_names)
+
+    x = MinMaxScaler().fit_transform(X)
+    y = OneHotEncoder(sparse=False).fit_transform(Y.reshape(-1, 1))
+    clf = tree.DecisionTreeClassifier(max_depth=2, random_state=1234)
+    x_train, x_test, y_train, y_test = train_test_split(x, y, random_state=1234)
+    model = clf.fit(x_train, y_train)
+    y_pred = model.predict(x_test)
+    print("Tree Accuracy:", f1_score(y_test, y_pred, average="macro") * 100)
+    text_representation = tree.export_text(model, feature_names=feat_names)
+    print(text_representation)
+
+    # %%
+
+    x_t = torch.FloatTensor(x)
+    y_t = torch.FloatTensor(y)
+    dataset = TensorDataset(x_t, y_t)
+
+    tot_points = x.shape[0]
+    input_size = x.shape[1]
+    n_classes = y.shape[1]
+
+    load = True
+    first_points = 5
     n_points = 5
-    rand_points = 2
-    n_iterations = (400 - first_points) // n_points
-    input_size = 2
-    hidden_size = 200
-    seeds = 10
-    lr = 1e-3
-    epochs = 250
-    print(f"Number of random points: {rand_points}")
+    n_iterations = (75 - first_points) // n_points
+    seeds = 10  #
+    lr = 3 * 1e-3
+    epochs = 200
+    hidden_size = 100
 
-    x_t = torch.rand(tot_points, input_size).to(dev)
-    y_t = (((x_t[:, 0] > 0.5) & (x_t[:, 1] < 0.5)) |
-           ((x_t[:, 1] > 0.5) & (x_t[:, 0] < 0.5))
-           ).float().to(dev)
-    y_multi_t = torch.stack((1 - y_t, y_t), dim=1)
-    feat_names = ["X1", "X2"]
+    KLoss = partial(IrisLoss, names=class_names)
+    # strategies = STRATEGIES
+    strategies = [KAL_LEN_DU]
+    # strategies = DROPOUTS
+    print("Strategies:", strategies)
+    print("n_points", n_points, "n_iterations", n_iterations)
 
-    assert (y_multi_t.argmax(dim=1) == y_t).all(), "Error in computing y multi label"
+    #%% md
 
-    # sns.scatterplot(x=x_t[:, 0].numpy(), y=x_t[:, 1].numpy(), hue=y_t.numpy())
-    # plt.savefig(f"{image_folder}\\data_labelling.png")
-    # plt.show()
+    #### Visualizing iris data
+
+    #%%
+
+    sns.scatterplot(x=x[:, 2], y=x[:, 3], hue=Y)
+    plt.savefig(f"{image_folder}\\data_labelling.png")
+    plt.show()
 
     # %% md
     #### Defining constraints as product t-norm of the FOL rule expressing the XOR
     # %%
-    # preds = MLP(1, 2, 100)(x_t).detach().squeeze()
-    #
-    # k_loss = KLoss()(y_t, x=x_t)
-    # sns.scatterplot(x=x_t[:, 0].numpy(), y=x_t[:, 1].numpy(), hue=k_loss.numpy())
-    # plt.show()
-    #
-    # k_loss = KLoss(uncertainty=True)(preds, x=x_t)
-    # sns.scatterplot(x=x_t[:, 0].numpy(), y=x_t[:, 1].numpy(), hue=k_loss.numpy())
-    # plt.show()
-    #
-    # s_loss = torch.nn.BCELoss(reduction="none")(preds, y_t)
-    # sns.scatterplot(x=x_t[:, 0].numpy(), y=x_t[:, 1].numpy(), hue=s_loss.numpy())
-    # plt.show()
+    k_loss = KLoss()(y_t, x=x_t)
+    sns.scatterplot(x=x_t[:, 2].numpy(), y=x_t[:, 3].numpy(), hue=k_loss.numpy())
+    plt.show()
 
     # %%md
     #### Calculating the prediction of the rule
     # %%
 
-    discrete_x = steep_sigmoid(x_t, k=10).float()
-    x1 = discrete_x[:, 0]
-    x2 = discrete_x[:, 1]
-    pred_rule = (x1 * (1 - x2)) + (x2 * (1 - x1))
-    print("Rule Accuracy:",
-          (pred_rule > 0.5).eq(y_t).sum().item() / y_t.shape[0] * 100)
-    # sns.scatterplot(x=x_t[:, 0].numpy(), y=x_t[:, 1].numpy(), hue=pred_rule)
-    # plt.show()
+    def calculate_rule_prediction(x_continue: torch.Tensor) -> torch.Tensor:
+        petal_length = steep_sigmoid(x_continue[:, 2], k=100, b=0.3).float()
+        petal_width = steep_sigmoid(x_continue[:, 3], k=100, b=0.6).float()
+        f1 = 1 - petal_length
+        f2 = petal_length * (1 - petal_width)
+        f3 = petal_length * petal_width
+        f = torch.stack((f1, f2, f3), dim=1)
+        f = torch.softmax(f, dim=1)
+        return f
 
-    # %%md
+    pred_rule = calculate_rule_prediction(x_t)
+    print("Rule Accuracy:", f1_score(y_t, pred_rule > 0.5, average="macro") * 100)
+    sns.scatterplot(x=x_t[:, 2].numpy(), y=x_t[:, 3].numpy(), hue=pred_rule.argmax(dim=1),
+                    style=y_t.argmax(dim=1) == pred_rule.argmax(dim=1))
+    plt.show()
+
+
     #### Active Learning Strategy Comparison
-    # %%
-
     dfs = []
     skf = StratifiedKFold(n_splits=seeds)
 
-    for seed, (train_idx, test_idx) in enumerate(skf.split(x_t, y_t)):
+    for seed, (train_idx, test_idx) in enumerate(skf.split(x_t, y_t.argmax(dim=1))):
         train_sample = len(train_idx)
         set_seed(seed)
         first_idx = np.random.choice(train_sample, first_points, replace=False).tolist()
         print("First idx", first_idx)
 
         for strategy in strategies:
+            active_strategy = SAMPLING_STRATEGIES[strategy](k_loss=KLoss,
+                                                            main_classes=[0, 1, 2])
             df_file = os.path.join(result_folder, f"metrics_{n_points}_points_"
                                                   f"{seed}_seed_{strategy}_strategy.pkl")
-            if os.path.exists(df_file) and load:  # and "LEN" not in strategy:
+            if os.path.exists(df_file) and load:
                 df = pd.read_pickle(df_file)
-                df['Explanations'] = ["" for _ in range (len(df['Seed']))] \
-                    if "Explanations" not in df else df['Explanations']
                 dfs.append(df)
-                df_first_idx = df['Used Idx'][0][:first_points]
-                assert df_first_idx == first_idx, \
-                    f"Error in loading the data, loaded first points are differents\n{df_first_idx}"
                 auc = df['Accuracy'].mean()
                 print(f"Already trained {df_file}, auc: {auc}")
                 continue
@@ -164,28 +188,18 @@ if __name__ == "__main__":
                 "Test Idx": []
             }
 
-            if strategy in [ADV_DEEPFOOL, ADV_BIM, ENTROPY, ENTROPY_D, BALD]:
-                n_classes = 2
-                x_train, y_train = x_t[train_idx], y_multi_t[train_idx]
-                x_test, y_test = x_t[test_idx], y_multi_t[test_idx]
-                # loss = torch.nn.CrossEntropyLoss(reduction="none")
-            else:
-                n_classes = 1
-                x_train, y_train = x_t[train_idx], y_t[train_idx]
-                x_test, y_test = x_t[test_idx], y_t[test_idx]
-
+            x_train, y_train = x_t[train_idx], y_t[train_idx]
+            x_test, y_test = x_t[test_idx], y_t[test_idx]
             train_dataset = TensorDataset(x_train, y_train)
             test_dataset = TensorDataset(x_test, y_test)
-            # if strategy in [KAL_STAR_DU, KAL_ STAR_DROP_DU]:
-            #     loss = CombinedLoss(KLoss)
-            # else:
+
             loss = torch.nn.BCEWithLogitsLoss(reduction="none")
             metric = F1()
 
             set_seed(0)
             net = MLP(n_classes, input_size, hidden_size, dropout=True).to(dev)
             expl = ELEN(input_size=input_size, hidden_size=hidden_size,
-                        n_classes=2, dropout=True).to(dev)
+                        n_classes=n_classes, dropout=True).to(dev)
 
             # first training with few randomly selected data
             losses = []
@@ -199,7 +213,7 @@ if __name__ == "__main__":
 
                 if strategy in DROPOUTS:
                     preds_dropout = predict_dropout(net, train_dataset)
-                    assert (preds_dropout - preds_t).abs().sum() > .1, \
+                    assert (preds_dropout - preds_t).abs().sum() > .0, \
                         "Error in computing dropout predictions"
                 else:
                     preds_dropout = None
@@ -209,10 +223,10 @@ if __name__ == "__main__":
                                                    )
                 formulas = []
                 if "LEN" in strategy:
-                    multi_dataset = TensorDataset(x_train, y_multi_t[train_idx])
+                    multi_dataset = TensorDataset(x_train, y_t[train_idx])
                     train_loop(expl, multi_dataset, used_idx, epochs, lr=lr)
-                    for i in range(2):
-                        formula = expl.explain(x_train, y_multi_t[train_idx], used_idx,
+                    for i in range(n_classes):
+                        formula = expl.explain(x_t, y_t, used_idx,
                                                feat_names, target_class=i)
                         formulas.append(formula)
                     KLoss = partial(Expl_2_Loss, feat_names, formulas)
@@ -225,9 +239,9 @@ if __name__ == "__main__":
                                                                     labels=y_t[train_idx],
                                                                     preds_dropout=preds_dropout,
                                                                     clf=net, dataset=train_dataset)
-                if "LEN" in strategy and rand_points > 0:
-                    rand_idx, rand_loss = RandomSampling().selection(preds_t, used_idx, rand_points)
-                    active_idx = active_idx[:-rand_points] + rand_idx
+                if "LEN" in strategy:
+                    rand_idx, rand_loss = RandomSampling().selection(preds_t, used_idx, 2)
+                    active_idx = active_idx[:-2] + rand_idx[:2]
 
                 used_idx += active_idx
 
@@ -273,28 +287,22 @@ if __name__ == "__main__":
     mean_auc = dfs.groupby("Strategy").mean().round(2)['Accuracy']
     std_auc = dfs.groupby(["Strategy", "Seed"]).mean().groupby("Strategy").std().round(2)['Accuracy']
     print("AUC", mean_auc, "+-", std_auc)
-
     # %% md
 
-    ### Displaying some pictures to visualize training
+    #### Displaying some pictures to visualize training
 
     # %%
+    dfs = pd.read_pickle(f"{result_folder}\\results.pkl")
 
-    sns.set(style="ticks", font_scale=1.8,
+    sns.set(style="ticks", font="Times New Roman", font_scale=1.3,
             rc={'figure.figsize': (6, 5)})
-    # for seed in range(seeds):
-    for seed in [4]:
-        for strategy in STRATEGIES:
-            if strategy in DROPOUTS:
-                continue
-            iterations = [0, 4, 9, 19]
-            for i in iterations:
-                print(f"Iteration {i}/{len(iterations)} {strategy} strategy")
-                png_file = os.path.join(f"{image_folder}", f"{strategy}_it_{i}_s_{seed}.png")
-                if not os.path.exists(png_file) or strategy in KALS:
-                    visualize_data_predictions(x_t, i, strategy, dfs, png_file,
-                                               seed=seed)
-                else:
-                    print(png_file + " Already extisting")
-
+    for strategy in strategies:
+        # iterations = [10] if strategy != SUPERVISED else [15]
+        iterations = [*range(1, 10)]
+        for i in iterations:
+            print(f"Iteration {i}/{len(iterations)} {strategy} strategy")
+            png_file = os.path.join(f"{image_folder}", f"{strategy}_{i}.png")
+            # if not os.path.exists(png_file):
+            visualize_data_predictions(x_t, i, strategy, dfs, png_file,
+                                       dimensions=[2, 3], dataset="iris")
 

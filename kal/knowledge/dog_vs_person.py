@@ -3,7 +3,7 @@ from typing import Tuple, Union
 import numpy as np
 import torch
 
-from . import KnowledgeLoss
+from kal.knowledge import KnowledgeLoss
 
 
 class DogvsPersonLoss(KnowledgeLoss):
@@ -150,3 +150,57 @@ class DogvsPersonLoss(KnowledgeLoss):
             arg_max = torch.argmax(losses, dim=0)
             return loss_sum, arg_max
         return loss_sum
+
+    @staticmethod
+    def get_rules():
+
+        rules = [
+            # A: OBJECT-PART --> [OBJECTS] RULES
+            "Dog_ear -> Dog",
+            "Dog_head -> Dog",
+            "Dog_leg -> Dog",
+            "Dog_muzzle -> Dog",
+            "Dog_neck -> Dog",
+            "Dog_nose -> Dog",
+            "Dog_paw -> Dog",
+            "Dog_tail -> Dog",
+            "Dog_torso -> Dog",
+
+            "Person_arm -> Person",
+            "Person_foot -> Person",
+            "Person_hair -> Person",
+            "Person_hand -> Person",
+            "Person_head -> Person",
+            "Person_leg -> Person",
+            "Person_neck -> Person",
+            "Person_nose -> Person",
+            "Person_torso -> Person",
+
+            # B: OBJECT --> [OBJECT-PARTS] RULES
+
+            "Dog -> Dog_ear | Dog_head | Dog_leg | Dog_muzzle | "
+            "Dog_neck | Dog_nose | Dog_paw | Dog_tail | Dog_torso",
+
+            "Person -> Person_arm  | Person_foot  | Person_hair  | "
+            "Person_hand  | Person_head  | Person_leg  | Person_neck  | "
+            "Person_nose  | Person_torso",
+
+            # C: OR ON THE OBJECTS
+            "Dog | Person",
+
+            # D: OR ON THE PARTS
+            "Dog_ear | Dog_head | Dog_leg | Dog_muzzle | Dog_neck | "
+            "Dog_nose | Dog_paw | Dog_tail | Dog_torso | Person_arm | "
+            "Person_foot | Person_hair | Person_hand | Person_head | "
+            "Person_leg | Person_neck | Person_nose | Person_torso",
+        ]
+
+        return rules
+
+
+if __name__ == "__main__":
+    from kal.utils import to_latex
+
+    list_rules = DogvsPersonLoss.get_rules()
+
+    to_latex(list_rules, "dog_rules.txt", truncate=False)

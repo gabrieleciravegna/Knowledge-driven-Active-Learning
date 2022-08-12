@@ -37,15 +37,15 @@ if __name__ == "__main__":
     from tqdm import trange
     from sklearn.model_selection import StratifiedKFold
 
-    from kal.active_strategies import STRATEGIES, SAMPLING_STRATEGIES, ADV_DEEPFOOL, ADV_BIM, ENTROPY, ENTROPY_D, BALD, \
-    KALS, MARGIN, MARGIN_D, DROPOUTS, KAL_PLUS_DROP_DU, KCENTER, KMEANS, NAME_MAPPINGS_LATEX, RANDOM, NAME_MAPPINGS, \
-    KAL_PLUS_DU, KAL_PLUS
-    from kal.network import MLP, train_loop, evaluate, predict, predict_dropout
-    from kal.utils import visualize_active_vs_sup_loss, set_seed
+    from kal.active_strategies import SAMPLING_STRATEGIES, ADV_DEEPFOOL, KALS, DROPOUTS, KAL_LEN_DU
+    from kal.network import MLP, train_loop, evaluate, predict, predict_dropout, ELEN
+    from kal.utils import set_seed
 
     from data.Animals import CLASS_1_HOTS, classes
     from kal.metrics import F1
     from kal.knowledge import AnimalLoss
+    from active_strategies import RandomSampling, KAL_LEN
+    from knowledge.expl_to_loss import Expl_2_Loss_CV
 
     plt.rc('animation', html='jshtml')
 
@@ -73,6 +73,7 @@ if __name__ == "__main__":
     #%%
     first_points = 100
     n_points = 50
+    rand_points = 20
     n_iterations = 48
     seeds = 5
     hidden_size = 100
@@ -81,16 +82,17 @@ if __name__ == "__main__":
     main_classes = range(7)
     metric = F1()
     load = True
+    print("Rand points", rand_points)
 
     # strategies = [BALD]
-    strategies = STRATEGIES
+    strategies = [KAL_LEN_DU]
     # # strategies.pop(strategies.index(KMEANS))
     # # strategies.pop(strategies.index(KCENTER))
-    strategies.pop(strategies.index(ADV_DEEPFOOL))
+    # strategies.pop(strategies.index(ADV_DEEPFOOL))
     # strategies.pop(strategies.index(ADV_BIM))
     # strategies = [ENTROPY_D, ENTROPY, MARGIN_D, MARGIN, ]
     # strategies = KALS[::-1]
-    strategies = KALS
+    # strategies = KALS
     print("Strategies:", strategies)
     print("n_points", n_points, "n_iterations", n_iterations)
 
@@ -196,17 +198,18 @@ if __name__ == "__main__":
 
             set_seed(0)
             net = MLP(n_classes, input_size, hidden_size, dropout=True).to(dev)
+            expl = [ELEN(input_size=n_classes-1, hidden_size=hidden_size,
+                         n_classes=1, dropout=True).to(dev) for _ in range(n_classes)]
 
             # first training with few randomly selected data
-            used_idx = first_idx.copy()
             losses = []
+            used_idx = first_idx.copy()
             for it in (pbar := tqdm.trange(1, n_iterations + 1)):
                 t = time.time()
-
                 losses += train_loop(net, train_dataset, used_idx, epochs,
                                      lr=lr, loss=loss, device=dev)
-
                 preds_t = predict(net, train_dataset, device=dev)
+
                 if strategy in DROPOUTS:
                     preds_dropout = predict_dropout(net, train_dataset, device=dev)
                     assert (preds_dropout - preds_t).abs().sum() > .0, \
@@ -214,13 +217,32 @@ if __name__ == "__main__":
                 else:
                     preds_dropout = None
 
-                test_accuracy, sup_loss = evaluate(net, test_dataset, metric=metric, loss=loss, device=dev)
+                test_accuracy, sup_loss = evaluate(net, test_dataset,
+                                                   metric=metric, loss=loss)
+                formulas = []
+                if "LEN" in strategy:
+                    for i in range(n_classes):
+                        expl_feats = torch.cat([y_train[:, :i], y_train[:, i+1:]], dim=1)
+                        expl_label = y_train[:, i].unsqueeze(dim=1)
+                        expl_names = class_names[:i] + class_names[i+1:]
+                        expl_dataset = TensorDataset(expl_feats, expl_label)
+                        train_loop(expl[i], expl_dataset, used_idx, epochs, lr=lr)
+                        formula = expl[i].explain(expl_feats, expl_label, used_idx,
+                                                  expl_names, target_class=0)
+                        formulas.append(formula)
+                    KLoss = partial(Expl_2_Loss_CV, class_names, formulas)
+                else:
+                    KLoss = AnimalLoss
 
-                active_idx, active_loss = active_strategy.selection(preds_t, used_idx, n_points,
-                                                                    x=x_t[train_idx], labels=y_t[train_idx],
+                active_strategy = SAMPLING_STRATEGIES[strategy](k_loss=KLoss, main_classes=[0, 1])
+                active_idx, active_loss = active_strategy.selection(preds_t, used_idx,
+                                                                    n_points, labels=y_t[train_idx],
                                                                     preds_dropout=preds_dropout,
-                                                                    clf=net, dataset=train_dataset,
-                                                                    main_classes=main_classes)
+                                                                    clf=net, dataset=train_dataset)
+                if "LEN" in strategy:
+                    rand_idx, rand_loss = RandomSampling().selection(preds_t, used_idx, 2)
+                    active_idx = active_idx[:-rand_points] + rand_idx[:rand_points]
+
                 used_idx += active_idx
 
                 df["Strategy"].append(strategy)
@@ -232,6 +254,7 @@ if __name__ == "__main__":
                 df["Accuracy"].append(test_accuracy)
                 df["Supervision Loss"].append(sup_loss)
                 df["Active Loss"].append(active_loss.cpu().numpy())
+                df["Explanations"].append(formulas)
                 df["Time"].append((time.time() - t))
                 df["Train Idx"].append(train_idx)
                 df["Test Idx"].append(test_idx)
@@ -239,6 +262,7 @@ if __name__ == "__main__":
                 assert isinstance(used_idx, list), "Error"
 
                 pbar.set_description(f"{strategy} {seed + 1}/{seeds}, "
+                                     f"expl: {formulas}, "
                                      f"auc: {np.mean(df['Accuracy']):.2f}, "
                                      f"s_l: {mean(sup_loss):.2f}, "
                                      f"l: {losses[-1]:.2f}, p: {len(used_idx)}")
@@ -260,96 +284,9 @@ if __name__ == "__main__":
     # dfs.to_pickle(f"{result_folder}\\metrics_{n_points}_points_{now}.pkl")
     dfs.to_pickle(f"{result_folder}\\results.pkl")
 
-    # %%
-
-    dfs = pd.read_pickle(os.path.join(f"{result_folder}",
-                                      f"metrics_{n_points}_points_{now}.pkl"))
-    dfs['Points'] = [len(used) for used in dfs['Used Idx']]
-    ours = ["KAL" in strategy for strategy in dfs['Strategy']]
-    dfs['Ours'] = ours
-
-    dfs = dfs.sort_values(['Strategy', 'Seed', 'Iteration'])
-    dfs = dfs.reset_index()
-
-    rows = []
-    Strategies = []
-    for i, row in dfs.iterrows():
-        if row['Points'] > (n_points * n_iterations + first_points):
-            dfs = dfs.drop(i)
-        else:
-            Strategies.append(NAME_MAPPINGS_LATEX[row['Strategy']])
-    dfs['Strategy'] = Strategies
-
-    aucs = []
-    dfs_auc_mean = dfs.groupby("Strategy").mean()['Accuracy'].tolist()
-    dfs_auc_std = dfs.groupby(["Strategy", "Seed"]).mean()['Accuracy'] \
-        .groupby("Strategy").std().tolist()
-    for mean, std in zip(dfs_auc_mean, dfs_auc_std):
-        auc = f"${mean:.2f}$ {{\\tiny $\\pm {std:.2f}$ }}"
-        aucs.append(auc)
-    df_auc = pd.DataFrame({
-        "Strategy": np.unique(Strategies),
-        "AUC": aucs,
-    }).set_index("Strategy")
-    print(df_auc.to_latex(float_format="%.2f", escape=False))
-    with open(os.path.join(f"{result_folder}",
-                           f"table_auc_latex_{now}.txt"), "w") as f:
-        f.write(df_auc.to_latex(float_format="%.2f", escape=False))
-
-    final_accs = []
-    dfs_final_accs = dfs[dfs['Iteration'] == n_iterations - 1]
-    final_accs_mean = dfs_final_accs.groupby("Strategy").mean()['Accuracy'].tolist()
-    final_accs_std = dfs_final_accs.groupby("Strategy").std()['Accuracy'].tolist()
-    for mean, std in zip(final_accs_mean, final_accs_std):
-        final_acc = f"${mean:.2f}$ {{\\tiny $\\pm {std:.2f}$ }}"
-        final_accs.append(final_acc)
-    df_final_acc = pd.DataFrame({
-        "Strategy": np.unique(Strategies),
-        "Final F1": final_accs,
-    }).set_index("Strategy")
-    print(df_final_acc.to_latex(float_format="%.2f", escape=False))
-    with open(os.path.join(f"{result_folder}",
-                           f"table_final_acc_latex_{now}.txt"), "w") as f:
-        f.write(df_final_acc.to_latex(float_format="%.2f", escape=False))
-
-    times = []
-    dfs_time_mean = dfs.groupby("Strategy").mean()['Time']
-    base_time = dfs_time_mean[dfs_time_mean.index == RANDOM].item()
-    for time in dfs_time_mean.tolist():
-        time = time / base_time
-        time = time if time >= 1. else 1.
-        time = f"${time:.2f}$ x"
-        times.append(time)
-    df_times = pd.DataFrame({
-        "Strategy": np.unique(Strategies),
-        "Times": times
-    }).set_index("Strategy")
-    print(df_times.to_latex(float_format="%.2f", escape=False))
-    with open(os.path.join(f"{result_folder}",
-                           f"table_times_latex_{now}.txt"), "w") as f:
-        f.write(df_times.to_latex(float_format="%.2f", escape=False))
-
-    # %%
-
-    sns.set(style="whitegrid", font_scale=1.5,
-            rc={'figure.figsize': (10, 8)})
-    sns.lineplot(data=dfs, x="Points", y="Accuracy",
-                 hue="Strategy", style="Ours", size="Ours",
-                 legend=False, ci=None, style_order=[1, 0],
-                 size_order=[1, 0], sizes=[4,2])
-    sns.despine(left=True, bottom=True)
-    plt.tight_layout()
-    plt.ylabel("Accuracy")
-    plt.xlabel("Number of points used")
-    # plt.xlim([-10, 400])
-    # plt.title("Comparison of the accuracies in the various strategy
-    #            in function of the iterations")
-    labels = [NAME_MAPPINGS[strategy] for strategy in sorted(strategies)]
-    plt.legend(title='Strategy', loc='lower right', labels=labels)
-    plt.savefig(f"{image_folder}\\Accuracy_{dataset_name}_{n_points}_points_{now}.png",
-                dpi=200)
-    plt.show()
-
+    mean_auc = dfs.groupby("Strategy").mean().round(2)['Accuracy']
+    std_auc = dfs.groupby(["Strategy", "Seed"]).mean().groupby("Strategy").std().round(2)['Accuracy']
+    print("AUC", mean_auc, "+-", std_auc)
     # %% md
 
     #### Displaying some pictures to visualize training

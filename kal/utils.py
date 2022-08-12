@@ -1,3 +1,5 @@
+from typing import List
+
 import numpy as np
 import pandas as pd
 import torch
@@ -60,6 +62,7 @@ def visualize_data_predictions(x_t: torch.Tensor, itr: int, act_strategy: str,
     if png_file is not None:
         plt.savefig(png_file)
     plt.show()
+
 
 def visualize_active_vs_sup_loss(i, active_strategy, dataframe, png_file: str = None,
                                  lin_regression=False):
@@ -133,3 +136,50 @@ def set_seed(seed: int):
 #     plt.title("Supervision Loss")
 #     plt.xlim([0, 1]), plt.ylim([0, 1]), plt.show()
 #     return
+
+
+def to_latex(rules: list, latex_file: str, truncate=True, terms=6):
+    rules = [rule.replace("&", "$\land$") for rule in rules]
+    rules = [rule.replace("|", "$\lor$") for rule in rules]
+    rules = [rule.replace("->", "$\Rightarrow$") for rule in rules]
+    rules = [rule.replace("_", "\_") for rule in rules]
+
+    i = 0
+    with open(latex_file, "w") as f:
+        for rule in rules:
+            if rule == "":
+                # f.write("\\midrule \n")
+                i = 0
+            else:
+                i += 1
+                if i >= terms and truncate:
+                    if i == terms:
+                        f.write(" & $\ldots$ $\ldots$ \\\\ \n")
+                    continue
+                f.write("$\\forall x$  &  ")
+                for j, term in enumerate(rule.split(" ")):
+                    if j == terms and truncate:
+                        f.write(" $\ldots$ ")
+                        break
+                    f.write(f" {term}")
+                f.write("\\\\ \n")
+
+
+def replace_expl_names(explanation: str, concept_names: List[str]) -> str:
+    import re
+    """
+    Replace names of concepts in a formula.
+    :param explanation: formula
+    :param concept_names: new concept names
+    :return: Formula with renamed concepts
+    """
+    feature_abbreviations = [f'feature{i:010}' for i in range(len(concept_names))]
+    mapping = []
+    for f_abbr, f_name in zip(feature_abbreviations, concept_names):
+        mapping.append((f_name, f_abbr))
+
+    for k, v in mapping:
+        # explanation = explanation.replace(k, v)
+        explanation = re.sub(r"\b%s\b" % k, v, explanation)
+
+    return explanation

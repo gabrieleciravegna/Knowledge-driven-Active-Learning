@@ -1,9 +1,10 @@
+import os
 from typing import Tuple, Union
 
 import numpy as np
 import torch
 
-from . import KnowledgeLoss
+from kal.knowledge import KnowledgeLoss
 
 
 class CUB200Loss(KnowledgeLoss):
@@ -87,4 +88,73 @@ class CUB200Loss(KnowledgeLoss):
             return loss_sum, arg_max
 
         return loss_sum
+
+    def get_rules(self, class_names: list):
+        rules = []
+        combinations = np.asarray(self.combinations)
+        class_names = [class_name.replace("::", "_") for class_name in class_names]
+        class_names = np.asarray(class_names)
+        attributes = np.asarray(self.attributes)
+        main_classes = np.asarray(self.main_classes)
+        for i in main_classes:
+            class_combination = torch.tensor(combinations[i, :], dtype=torch.bool)
+            main_class_name = class_names[i]
+            if torch.sum(class_combination.to(torch.int)) > 0:
+                attributes_implied = attributes[class_combination]
+                attributes_names = class_names[attributes_implied]
+                rule = main_class_name + " -> "
+                for attributes_name in attributes_names:
+                    rule += attributes_name + " & "
+                rule = rule[:-3]
+                rules.append(rule)
+        rules.append("")
+
+        # Attribute --> Classes
+        for j_a, j in enumerate(attributes):
+            attribute_name = class_names[j]
+            attribute_combination = torch.tensor(combinations[:, j_a], dtype=torch.bool)
+            if torch.sum(attribute_combination.to(torch.int)) > 0:
+                class_implied = main_classes[attribute_combination]
+                class_names_implied = class_names[class_implied]
+                rule = attribute_name + " -> "
+                for class_name in class_names_implied:
+                    rule += class_name + " & "
+                rule = rule[:-3]
+                rules.append(rule)
+
+        rules.append("")
+
+        # OR on the main classes
+        or_rule_main = ""
+        for main_class_name in class_names[main_classes]:
+            or_rule_main += main_class_name + " | "
+        or_rule_main = or_rule_main[:-3]
+        rules.append(or_rule_main)
+        rules.append("")
+
+        # OR on the attributes
+        or_rule_attr = ""
+        for attr_class_name in class_names[attributes]:
+            or_rule_attr += attr_class_name + " | "
+        or_rule_attr = or_rule_attr[:-3]
+        rules.append(or_rule_attr)
+
+        return rules
+
+
+if __name__ == "__main__":
+    from data.Cub200 import CUBDataset
+    from torchvision.transforms import transforms
+    from kal.utils import to_latex
+
+    root_folder = os.path.join("..", "..", "data", "CUB200")
+    dataset = CUBDataset(root_folder, transforms.Compose([transforms.ToTensor()]))
+
+    cub_loss = CUB200Loss(main_classes=dataset.main_classes,
+                          attributes=dataset.attributes,
+                          combinations=dataset.class_attr_comb)
+
+    list_rules = cub_loss.get_rules(dataset.class_names)
+
+    to_latex(list_rules, "cub_rules.txt")
 

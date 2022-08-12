@@ -152,6 +152,10 @@ class CUBDataset(Dataset):
         self.class_attr_comb = np.asarray(self.class_attr_comb).squeeze()
         self.imgs = {i: None for i in range(len(self))}
 
+        with open(os.path.join(root, class_name_file), "r") as f:
+            class_names = f.read().splitlines()
+            self.class_names = class_names
+
     def __getitem__(self, index: int) -> [torch.Tensor, torch.Tensor]:
         # Load the image
         img_index = f"{index+1:05d}"

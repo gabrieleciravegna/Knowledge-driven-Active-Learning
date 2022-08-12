@@ -41,7 +41,8 @@ class XORLoss(KnowledgeLoss):
     def __call__(self, output: torch.Tensor, x: torch.Tensor = None, return_argmax=False,
                  return_losses=False) \
             -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
-        assert x is not None, "Need to pass input data to compute the violation loss"
+        assert x is not None, "Must pass input data to compute " \
+                              "the rule violation loss on this dataset"
 
         if len(output.shape) > 1:
             output = output[:, 1]

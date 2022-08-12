@@ -7,6 +7,7 @@ from matplotlib import pyplot as plt
 
 from kal.active_strategies.strategy import Strategy
 from kal.knowledge import KnowledgeLoss, XORLoss, IrisLoss
+from knowledge.expl_to_loss import Expl_2_Loss
 
 
 class KALSampling(Strategy):
@@ -16,7 +17,9 @@ class KALSampling(Strategy):
         self.dropout = False
 
     def loss(self, preds, *args, x=None, preds_dropout=None, return_argmax=False, **kwargs):
-        if isinstance(self.k_loss, IrisLoss) or isinstance(self.k_loss, XORLoss):
+        if isinstance(self.k_loss, IrisLoss) \
+                or isinstance(self.k_loss, XORLoss) \
+                or isinstance(self.k_loss, Expl_2_Loss):
             c_loss, arg_max = self.k_loss(preds, x=x, return_argmax=True)
         else:
             c_loss, arg_max = self.k_loss(preds, return_argmax=True)

@@ -14,7 +14,7 @@ from tqdm import trange
 from torch_explain.nn import EntropyLinear
 from torch_explain.logic.nn.entropy import explain_class
 
-from kal.knowledge.knowledge_loss import CombinedLoss
+from kal.losses import CombinedLoss
 from kal.metrics import Metric, F1
 
 num_workers = 0
@@ -98,7 +98,8 @@ class MLP(torch.nn.Module):
 class ELEN(MLP):
     def __init__(self, *args, **kwargs):
         super(ELEN, self).__init__(*args, **kwargs)
-        self.fc1 = EntropyLinear(self.input_size, self.hidden_size, self.n_classes)
+        self.fc1 = EntropyLinear(self.input_size, self.hidden_size,
+                                 self.n_classes, temperature=1)
         self.fc2 = torch.nn.Linear(self.hidden_size, 1)
 
     def forward(self, input_x: torch.Tensor, return_logits=False) -> Union[Tuple[Tensor, Tensor], Tensor]:
@@ -116,9 +117,9 @@ class ELEN(MLP):
             return output, logits
         return output
 
-    def explain(self, x, y, train_idx, feat_names):
-        expl = explain_class(self, x, y, train_idx, train_idx, target_class=1, topk_explanations=5,
-                             y_threshold=0.5)[0]
+    def explain(self, x, y, train_idx, feat_names, target_class):
+        expl = explain_class(self, x, y, train_idx, train_idx,
+                             target_class=target_class, y_threshold=0.5)[0]
         expl = replace_names(expl, feat_names)
         return expl
 
@@ -135,7 +136,7 @@ def train_loop(network: torch.nn.Module, data: TensorDataset, train_idx: List,
     train_data = Subset(data, train_idx)
 
     if batch_size is None:
-        data_loader = [[tensor[train_data.indices, :]
+        data_loader = [[tensor[train_data.indices]
                         for tensor in train_data.dataset.tensors]]
     else:
         data_loader = DataLoader(train_data, batch_size=batch_size, pin_memory=True,
@@ -151,9 +152,9 @@ def train_loop(network: torch.nn.Module, data: TensorDataset, train_idx: List,
             optimizer.zero_grad()
             output, logits = network(input_data, return_logits=True)
             if isinstance(loss, CombinedLoss):
-                s_l = loss(logits.squeeze(), target=labels, x=input_data)
+                s_l = loss(logits, target=labels, x=input_data)
             else:
-                s_l = loss(logits.squeeze(), labels)
+                s_l = loss(logits, labels)
             # s_l[s_l > 1] /= 10  # may allow to avoid numerical problems
             s_l = s_l.mean()
             s_l.backward()
@@ -200,7 +201,7 @@ def predict(network, data: TensorDataset, batch_size=None, loss=None,
             p_t, logits = network(input_data, return_logits=True)
             preds.append(p_t.squeeze())
             if loss is not None:
-                l_val = loss(logits.squeeze(), target=labels)
+                l_val = loss(logits, target=labels)
                 if len(l_val.shape) > 1:
                     l_val = l_val.sum(dim=1)
                 losses += l_val.cpu().numpy().tolist()
