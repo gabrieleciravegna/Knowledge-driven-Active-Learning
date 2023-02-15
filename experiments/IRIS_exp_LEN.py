@@ -1,4 +1,3 @@
-from active_strategies import RandomSampling
 
 if __name__ == "__main__":
 
@@ -24,7 +23,7 @@ if __name__ == "__main__":
     from sklearn.preprocessing import MinMaxScaler, OneHotEncoder
 
     from kal.knowledge import IrisLoss
-    from kal.utils import visualize_data_predictions, set_seed
+    from kal.utils import visualize_data_predictions, set_seed, tree_to_formula
 
     import matplotlib.pyplot as plt
     import numpy as np
@@ -35,12 +34,14 @@ if __name__ == "__main__":
     from torch.utils.data import TensorDataset
     from functools import partial
 
-    from knowledge.expl_to_loss import Expl_2_Loss
+    from kal.knowledge.expl_to_loss import Expl_2_Loss
 
     from kal.active_strategies import SAMPLING_STRATEGIES, DROPOUTS, KAL_LEN_DU
     from kal.knowledge.xor import XORLoss, steep_sigmoid
     from kal.metrics import F1
     from kal.network import MLP, train_loop, evaluate, predict_dropout, predict, ELEN
+    from kal.active_strategies import RandomSampling
+    from sklearn.tree import DecisionTreeClassifier
 
     plt.rc('animation', html='jshtml')
     plt.close('all')
@@ -96,7 +97,7 @@ if __name__ == "__main__":
     input_size = x.shape[1]
     n_classes = y.shape[1]
 
-    load = True
+    load = False
     first_points = 5
     n_points = 5
     n_iterations = (75 - first_points) // n_points
@@ -198,8 +199,9 @@ if __name__ == "__main__":
 
             set_seed(0)
             net = MLP(n_classes, input_size, hidden_size, dropout=True).to(dev)
-            expl = ELEN(input_size=input_size, hidden_size=hidden_size,
-                        n_classes=n_classes, dropout=True).to(dev)
+            # expl_model = ELEN(input_size=input_size, hidden_size=hidden_size,
+            #                   n_classes=n_classes, dropout=True).to(dev)
+            expl_model = DecisionTreeClassifier()
 
             # first training with few randomly selected data
             losses = []
@@ -221,15 +223,18 @@ if __name__ == "__main__":
                 test_accuracy, sup_loss = evaluate(net, test_dataset, metric=metric,
                                                    loss=torch.nn.BCEWithLogitsLoss(reduction="none")
                                                    )
-                formulas = []
+                formulas, expl_accs = [], []
                 if "LEN" in strategy:
-                    multi_dataset = TensorDataset(x_train, y_t[train_idx])
-                    train_loop(expl, multi_dataset, used_idx, epochs, lr=lr)
-                    for i in range(n_classes):
-                        formula = expl.explain(x_t, y_t, used_idx,
-                                               feat_names, target_class=i)
+                    expl_feats, expl_labels = x_train > 0.5, y_t[train_idx]
+                    expl_model = expl_model.fit(expl_feats[used_idx], expl_labels[used_idx])
+                    expl_accs.append(expl_model.score(expl_feats, expl_labels))
+                    for i in range(2):
+                        # formula = expl_model.explain(x_train, y_multi_t[train_idx], used_idx,
+                        #                              feat_names, target_class=it)
+                        formula = tree_to_formula(expl_model, feat_names, target_class=i)
                         formulas.append(formula)
-                    KLoss = partial(Expl_2_Loss, feat_names, formulas)
+                    assert it < 10 or expl_accs[0] > 0.2, "Error in training the explainer"
+                    KLoss = partial(Expl_2_Loss, feat_names, formulas, mutual_excl=True, double_imp=True)
                 else:
                     KLoss = XORLoss
 
@@ -262,7 +267,7 @@ if __name__ == "__main__":
                 assert isinstance(used_idx, list), "Error"
 
                 pbar.set_description(f"{strategy} {seed + 1}/{seeds}, "
-                                     f"expl: {formulas}, "
+                                     f"expl_acc: {np.mean(expl_accs)}, "
                                      f"auc: {np.mean(df['Accuracy']):.2f}, "
                                      f"s_l: {mean(sup_loss):.2f}, "
                                      f"l: {losses[-1]:.2f}, p: {len(used_idx)}")

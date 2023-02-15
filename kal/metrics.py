@@ -44,3 +44,5 @@ class F1(Metric):
 		f1_value = f1_score(predictions.cpu().numpy(), labels.cpu().numpy(),
 							average='macro', zero_division=0) * 100
 		return f1_value
+
+

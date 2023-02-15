@@ -79,7 +79,7 @@ def compute_loss(predictions, targets, model, reduction="mean"):
 
     # Calculate losses for each yolo layer
     for layer_index, layer_predictions in enumerate(predictions):
-        # Get image ids, anchors, grid index i and j for each target in the current yolo layer
+        # Get image ids, anchors, grid index it and j for each target in the current yolo layer
         b, anchor, grid_j, grid_i = indices[layer_index]
         # Build empty object target tensor with the same shape as the object prediction
         tobj = torch.zeros_like(layer_predictions[..., 0], device=device)  # target obj

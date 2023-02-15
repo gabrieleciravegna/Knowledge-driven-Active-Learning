@@ -519,24 +519,24 @@ if __name__ == "__main__":
     #     active_strategy = SAMPLING_STRATEGIES[strategy](k_loss=KLoss, main_classes=[0, 1])
     #
     #     for seed in seeds:
-    #         for i in range(0, n_iterations + 1):
+    #         for it in range(0, n_iterations + 1):
     #
-    #             used_points = first_points + i * n_points
+    #             used_points = first_points + it * n_points
     #
     #             df_file = os.path.join(result_folder, f"metrics_{strategy}_strategy_{seed}_seed_"
     #                                                   f"{used_points}_points.pkl")
     #             model_file = os.path.join(model_folder, f"model_{strategy}_strategy_{seed}_seed_"
     #                                                     f"{used_points}_points.pt")
-    #             if i == 0:
+    #             if it == 0:
     #                 df_file = os.path.join(result_folder, f"metrics_{KAL}_strategy_{seed}_seed_"
     #                                                       f"{used_points}_points.pkl")
     #                 model_file = os.path.join(model_folder, f"model_{KAL}_strategy_{seed}_seed_"
     #                                                         f"{used_points}_points.pt")
     #
-    #             if os.path.exists(df_file) and os.path.exists(model_file) and (load or i == 0):
+    #             if os.path.exists(df_file) and os.path.exists(model_file) and (load or it == 0):
     #                 print(f"Already trained {model_file} - {datetime.now()}")
     #                 df = pd.read_pickle(df_file)
-    #                 if i == 0:
+    #                 if it == 0:
     #                     df['strategy'] = strategy
     #                 dfs.append(df)
     #
@@ -555,7 +555,7 @@ if __name__ == "__main__":
     #                 print(f"mAP {accuracy}")
     #
     #                 continue
-    #             elif i == 0:
+    #             elif it == 0:
     #                 raise RuntimeError("Error in loading first dataframe")
     #
     #             print(f"Training {model_file} - {datetime.now()}")
@@ -581,7 +581,7 @@ if __name__ == "__main__":
     #             d = {
     #                 "strategy": [strategy],
     #                 "seed": [seed],
-    #                 "iteration": [i],
+    #                 "iteration": [it],
     #                 "active_idx": [active_idx.copy()],
     #                 "used_idx": [used_idx.copy()],
     #                 "predictions": [preds_t.cpu().numpy()],

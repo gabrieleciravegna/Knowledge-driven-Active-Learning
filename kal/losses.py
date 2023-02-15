@@ -2,8 +2,9 @@ from typing import Callable
 
 import torch
 import torch_explain
+from torch.nn import NLLLoss
 
-from knowledge import KnowledgeLoss
+from kal.knowledge import KnowledgeLoss
 
 
 class CombinedLoss:
@@ -30,10 +31,11 @@ class EntropyLoss:
         self.model = model
         self.sup_loss = sup_loss
         self.lambda_val = lambda_val
-        self.sigmoid = torch.nn.Sigmoid()
 
     def __call__(self, preds, *args, target=None, **kwargs):
         assert target is not None
+        if isinstance(self.sup_loss, NLLLoss) and len(target.shape) > 1:
+            target = target.argmax(dim=1)
         sup_loss = self.sup_loss(preds, target=target)
         e_loss = torch_explain.nn.functional.entropy_logic_loss(self.model)
         return sup_loss + self.lambda_val * e_loss

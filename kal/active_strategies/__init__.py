@@ -52,6 +52,10 @@ KAL_LEN = "KAL_LEN"
 KAL_LEN_D = "KAL_LEN_D"
 KAL_LEN_U = "KAL_LEN_U"
 KAL_LEN_DU = "KAL_LEN_DU"
+KAL_LEN_DU_00 = "KAL_LEN_DU_00"
+KAL_LEN_DU_25 = "KAL_LEN_DU_25"
+KAL_LEN_DU_50 = "KAL_LEN_DU_50"
+KAL_LEN_DU_75 = "KAL_LEN_DU_75"
 KAL_LEN_DROP = "KAL_LEN_DROP"
 KAL_LEN_DROP_D = "KAL_LEN_DROP_D"
 KAL_LEN_DROP_U = "KAL_LEN_DROP_U"
@@ -69,9 +73,14 @@ BALD2 = "BALD2"
 ADV_DEEPFOOL = "Adv_DeepFool"
 ADV_BIM = "Adv_BIM"
 
+# KAL_0 = "KAL_00"
 KAL_25 = "KAL_25"
 KAL_50 = "KAL_50"
 KAL_75 = "KAL_75"
+KAL_DU_00 = "KAL_DU_00"
+KAL_DU_25 = "KAL_DU_25"
+KAL_DU_50 = "KAL_DU_50"
+KAL_DU_75 = "KAL_DU_75"
 
 STRATEGIES = [
     SUPERVISED,
@@ -84,8 +93,8 @@ STRATEGIES = [
     # KAL_DROP_U,
     # KAL_DROP_D,
     KAL_DROP_DU,
-    KAL_LEN_DU,
-    KAL_LEN_DROP_DU,
+    # KAL_LEN_DU,
+    # KAL_LEN_DROP_DU,
     # KAL_PLUS,
     # KAL_PLUS_U,
     # KAL_PLUS_D,
@@ -117,6 +126,15 @@ FAST_STRATEGIES = [
     MARGIN,
     UNCERTAINTY,
     ENTROPY,
+]
+
+REGRESSION_STRATEGIES = [
+    SUPERVISED,
+    RANDOM,
+    KAL_DU,
+    KAL_DROP_DU,
+    KMEANS,
+    KCENTER,
 ]
 
 DROPOUTS = [
@@ -159,9 +177,30 @@ KALS = [
     KAL_75,
 ]
 
+KAL_PARTIAL = [
+    # KAL_0,
+    KAL_25,
+    KAL_50,
+    KAL_75,
+    KAL,
+    KAL_DU_00,
+    KAL_DU_25,
+    KAL_DU_50,
+    KAL_DU_75,
+    KAL_DU
+]
+
 KAL_STARS = [
     KAL_STAR_DU,
     KAL_STAR_DROP_DU
+]
+
+KAL_LENS = [
+    KAL_LEN_DU,
+    KAL_LEN_DU_00,
+    KAL_LEN_DU_25,
+    KAL_LEN_DU_50,
+    KAL_LEN_DU_75
 ]
 
 SAMPLING_STRATEGIES: Dict[str, Callable[..., Strategy]] = {
@@ -202,9 +241,18 @@ SAMPLING_STRATEGIES: Dict[str, Callable[..., Strategy]] = {
     BALD2: BALDSampling2,
     ADV_DEEPFOOL: AdversarialDeepFoolSampling,
     ADV_BIM: AdversarialBIMSampling,
+    # KAL_0: KALSampling,
     KAL_25: KALSampling,
     KAL_50: KALSampling,
     KAL_75: KALSampling,
+    KAL_DU_00: KALDiversityUncSampling,
+    KAL_DU_25: KALDiversityUncSampling,
+    KAL_DU_50: KALDiversityUncSampling,
+    KAL_DU_75: KALDiversityUncSampling,
+    KAL_LEN_DU_00: KALDiversityUncSampling,
+    KAL_LEN_DU_25: KALDiversityUncSampling,
+    KAL_LEN_DU_50: KALDiversityUncSampling,
+    KAL_LEN_DU_75: KALDiversityUncSampling
 }
 
 NAME_MAPPINGS_ABLATION_STUDY = {
@@ -232,7 +280,16 @@ NAME_MAPPINGS_ABLATION_STUDY = {
 NAME_MAPPINGS = {
     SUPERVISED: "SupLoss",
     RANDOM: RANDOM,
+    KAL: "KAL-",
+    # KAL_00: "KAL-00\%",
+    KAL_25: "KAL- 25\%",
+    KAL_50: "KAL- 50\%",
+    KAL_75: "KAL- 75\%",
     KAL_DU: "KAL",
+    KAL_DU_00: "KAL 00\%",
+    KAL_DU_25: "KAL 25\%",
+    KAL_DU_50: "KAL 50\%",
+    KAL_DU_75: "KAL 75\%",
     KAL_DROP_DU: "KAL$_D$",
     KAL_PLUS_DU: "KAL$^+$",
     KAL_PLUS_DROP_DU: "KAL$_D^+$",
