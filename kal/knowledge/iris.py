@@ -1,3 +1,4 @@
+import random
 from typing import Tuple, Union
 
 import torch
@@ -13,10 +14,11 @@ def steep_sigmoid(x: torch.Tensor, k=100, b=0.5) -> torch.Tensor:
 
 class IrisLoss(KnowledgeLoss):
     def __init__(self, names=None, mu=1,
-                 uncertainty: bool = False):
+                 uncertainty: bool = False, percentage=None):
         super().__init__(names)
         self.mu = mu
         self.uncertainty = uncertainty
+        self.percentage = percentage
 
     def __call__(self, output: torch.Tensor, x: torch.Tensor = None, return_argmax=False, return_losses=False) \
             -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
@@ -85,6 +87,10 @@ class IrisLoss(KnowledgeLoss):
                     c_loss21 + c_loss22,
                     c_loss31 + c_loss32,
                     c_loss4]
+
+        if self.percentage is not None:
+            n_rules = round(len(c_losses) * self.percentage // 100)
+            c_losses = random.sample(c_losses, k=n_rules)
 
         if self.uncertainty:
             c_losses.extend([self.mu * c_loss_unc1,

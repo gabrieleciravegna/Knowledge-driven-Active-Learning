@@ -10,6 +10,8 @@ import random
 # from torch.utils.data.dataset import TensorDataset
 # from kal.knowledge import KnowledgeLoss
 # from kal.network import MLP
+from sklearn.tree import _tree, DecisionTreeClassifier
+
 from kal.active_strategies import NAME_MAPPINGS
 
 
@@ -37,16 +39,16 @@ def visualize_data_predictions(x_t: torch.Tensor, itr: int, act_strategy: str,
         if len(preds.shape) > 1:
             preds = preds[:, 0]
         new_idx = [1 if idx in a_idx else 0 for idx in u_idx]
-        sns.scatterplot(x=x_0, y=x_1, hue=preds, legend=False)
+        sns.scatterplot(x=x_0, y=x_1, hue=preds, legend=True)
         sns.scatterplot(x=x_0[np.asarray(u_idx)], y=x_1[np.asarray(u_idx)],
-                        hue=new_idx, legend=False)
+                        hue=new_idx, size=new_idx, legend=True)
         plt.xlabel("$x_1$")
         plt.ylabel("$x_2$")
     else:
         preds = np.argmax(preds, axis=1)
         new_idx = [2 if idx in a_idx else 1 if idx in u_idx else 0
                    for idx in range(preds.shape[0])]
-        sns.scatterplot(x=x_0, y=x_1, hue=preds, style=new_idx, markers=['o', 'X', 'D',])
+        sns.scatterplot(x=x_0, y=x_1, hue=preds, style=new_idx, markers=['o', 'X', 'D', ])
         plt.xlabel("$Petal Length$")
         plt.ylabel("$petal Width$")
 
@@ -108,6 +110,7 @@ def set_seed(seed: int):
     np.random.seed(seed)
     torch.manual_seed(seed)
     random.seed(seed)
+
 
 # def visualize_data_predictions(network: MLP, data: TensorDataset,
 #                                k_loss: KnowledgeLoss, idx: list = None):
@@ -176,10 +179,79 @@ def replace_expl_names(explanation: str, concept_names: List[str]) -> str:
     feature_abbreviations = [f'feature{i:010}' for i in range(len(concept_names))]
     mapping = []
     for f_abbr, f_name in zip(feature_abbreviations, concept_names):
+        f_name = re.sub('[^a-zA-Z0-9_&|~ \n\.]', '', f_name)
         mapping.append((f_name, f_abbr))
 
+    explanation = re.sub('[^a-zA-Z0-9_&|~ \n\.]', '', explanation)
     for k, v in mapping:
         # explanation = explanation.replace(k, v)
         explanation = re.sub(r"\b%s\b" % k, v, explanation)
 
+    return explanation
+
+
+def tree_to_formula(tree: DecisionTreeClassifier, concept_names: List[str], target_class: int,
+                    skip_negation=False) -> str:
+    """
+    Translate a decision tree into a set of decision rules.
+
+    :param tree: sklearn decision tree
+    :param concept_names: concept names
+    :param target_class: target class
+    :param skip_negation:
+    :return: decision rule
+    """
+    tree_ = tree.tree_
+    feature_name = [
+        concept_names[i] if i != _tree.TREE_UNDEFINED else "undefined!"
+        for i in tree_.feature
+    ]
+    pathto = dict()
+
+    global k
+    global explanation
+    explanation = ''
+    k = 0
+
+    def recurse(node, depth, parent):
+        global k
+        global explanation
+        indent = "  " * depth
+
+        if tree_.feature[node] != _tree.TREE_UNDEFINED:
+            name = feature_name[node]
+            threshold = tree_.threshold[node]
+            assert threshold == 0.5, f"Error in threshold {threshold}"
+            s = f'~{name}'
+            if node == 0:
+                pathto[node] = s
+            else:
+                pathto[node] = pathto[parent] + ' & ' + s
+            recurse(tree_.children_left[node], depth + 1, node)
+
+            s = f'{name}'
+            if node == 0:
+                pathto[node] = s
+            else:
+                pathto[node] = pathto[parent] + ' & ' + s
+            recurse(tree_.children_right[node], depth + 1, node)
+        else:
+            k = k + 1
+            if tree_.value[node].squeeze().argmax() == target_class:
+                explanation += f'({pathto[parent]}) | '
+
+    recurse(0, 1, 0)
+    explanation = explanation[:-3]
+    if skip_negation:
+        new_expl = ""
+        for or_term in explanation.split(" | "):
+            new_expl += "("
+            for and_term in or_term.split(" & "):
+                if "~" not in and_term:
+                    new_expl += and_term.replace(")", "", ).replace("(", "") + " & "
+            if new_expl == "(":
+                new_expl = or_term + " | "
+            else:
+                new_expl = new_expl[:-3] + ") | "
+        explanation = new_expl[:-3]
     return explanation

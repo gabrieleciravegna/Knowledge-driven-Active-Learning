@@ -271,7 +271,7 @@ main_classes = [
 ]
 
 # name_list = np.unique(np.asarray([v for v in mappings.values()]))
-# name_ids = {name: i for i, name in enumerate(name_list)}
+# name_ids = {name: it for it, name in enumerate(name_list)}
 # n_classes = len(name_list)
 
 # bad_targets_idx = [125,   154,   181,   287,   396,   400,   447,   494,   935,  1124,  1249,  1319,  2028,  2046,

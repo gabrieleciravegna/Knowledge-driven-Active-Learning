@@ -12,10 +12,18 @@ class SupervisedSampling(Strategy):
     We directly select the point which mostly violates the supervision loss.
     """
 
+    def __init__(self, *args, loss=None, **kwargs):
+        if loss is None:
+            self.loss_fun = torch.nn.BCELoss(reduction="none")
+        else:
+            self.loss_fun = loss
+        super().__init__(*args, **kwargs)
+
     def loss(self, preds, labels=None, **kwargs):
         assert labels is not None, "Labels need to be passed in Supervised Sampling loss method"
 
-        s_loss: torch.Tensor = torch.nn.BCELoss(reduction="none")(preds, labels)
+        s_loss: torch.Tensor = self.loss_fun(preds.squeeze(),
+                                             labels.squeeze())
 
         if len(s_loss.shape) > 1:
             s_loss = s_loss.sum(dim=1)

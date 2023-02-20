@@ -22,7 +22,7 @@ class CUB200Loss(KnowledgeLoss):
     def __call__(self, output, targets=False, return_argmax=False, return_losses=False) \
             -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
 
-        # Class --> Attributes
+        # Class --> Attribute1 | Attribute2 | ...
         combinations = np.asarray(self.combinations)
         loss_fol_product_tnorm = []
         attribute_outputs = output[:, self.attributes]
@@ -35,7 +35,7 @@ class CUB200Loss(KnowledgeLoss):
                 loss_fol_product_tnorm.append(loss)
                 assert not targets or loss.sum() == 0, "Error in calculating implications Class -> Attr"
 
-        # Attribute --> Classes
+        # Attribute --> Class1 | Class2 | ...
         main_class_outputs = output[:, self.main_classes]
         for j_a, j in enumerate(self.attributes):
             a = output[:, j]
@@ -58,17 +58,17 @@ class CUB200Loss(KnowledgeLoss):
         loss_fol_product_tnorm.append(loss)
         assert not targets or loss.sum() == 0, "Error in calculating OR on attributes"
 
-        if self.uncertainty:
-            unc_loss = 0
-            for i in range(output.shape[1]):
-                unc_loss += output[:, i] * (1 - output[:, i])
-            loss_fol_product_tnorm.append(unc_loss)
-
         losses = torch.stack(loss_fol_product_tnorm, dim=1)
 
         if self.percentage is not None:
             n_rules = losses.shape[1] * self.percentage // 100
             losses = losses[:, :n_rules]
+
+        if self.uncertainty:
+            unc_loss = 0.
+            for i in range(output.shape[1]):
+                unc_loss += output[:, i] * (1 - output[:, i])
+            losses = torch.cat((losses, unc_loss.unsqueeze(dim=1)), dim=1)
 
         arg_max = torch.argmax(losses, dim=1)
 

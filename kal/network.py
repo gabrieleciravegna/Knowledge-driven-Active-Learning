@@ -13,8 +13,8 @@ from torchvision.models.resnet import BasicBlock, resnet18
 from tqdm import trange
 from torch_explain.nn import EntropyLinear
 from torch_explain.logic.nn.entropy import explain_class
-
-from kal.losses import CombinedLoss
+from torch_explain.logic.metrics import test_explanation
+from kal.losses import CombinedLoss, EntropyLoss
 from kal.metrics import Metric, F1
 
 num_workers = 0
@@ -63,7 +63,7 @@ class ResNet10(torch.nn.Module):
 
 class MLP(torch.nn.Module):
     def __init__(self, n_classes, input_size, hidden_size, dropout=False,
-                 dropout_rate=0.01):
+                 dropout_rate=0.01, activation=torch.nn.Sigmoid()):
         super(MLP, self).__init__()
         self.n_classes = n_classes
         self.input_size = input_size
@@ -74,7 +74,7 @@ class MLP(torch.nn.Module):
         # if n_classes > 1:
         #     self.activation = torch.nn.Softmax()
         # else:
-        self.activation = torch.nn.Sigmoid()
+        self.activation = activation
         self.dropout = dropout
         self.dropout_rate = dropout_rate
 
@@ -117,10 +117,16 @@ class ELEN(MLP):
             return output, logits
         return output
 
-    def explain(self, x, y, train_idx, feat_names, target_class):
-        expl = explain_class(self, x, y, train_idx, train_idx,
-                             target_class=target_class, y_threshold=0.5)[0]
-        expl = replace_names(expl, feat_names)
+    def explain(self, x, y, train_idx, feat_names, target_class, return_acc=False):
+        x_train = x[train_idx]
+        y_train = y[train_idx]
+        train_mask = torch.ones(len(train_idx), dtype=bool)
+        expl_raw = explain_class(self, x_train, y_train, train_mask, train_mask,
+                                 target_class=target_class, y_threshold=0.5, try_all=False)[0]
+        expl = replace_names(expl_raw, feat_names)
+        if return_acc:
+            accuracy, _ = test_explanation(expl_raw, x.cpu(), y.cpu(), target_class)
+            return expl, accuracy
         return expl
 
 
@@ -151,33 +157,34 @@ def train_loop(network: torch.nn.Module, data: TensorDataset, train_idx: List,
             input_data, labels = input_data.to(device), labels.to(device)
             optimizer.zero_grad()
             output, logits = network(input_data, return_logits=True)
-            if isinstance(loss, CombinedLoss):
+            if isinstance(loss, CombinedLoss) or isinstance(loss, EntropyLoss):
                 s_l = loss(logits, target=labels, x=input_data)
             else:
-                s_l = loss(logits, labels)
+                s_l = loss(logits.squeeze(), labels.squeeze())
             # s_l[s_l > 1] /= 10  # may allow to avoid numerical problems
             s_l = s_l.mean()
             s_l.backward()
             optimizer.step()
-            l_train.append(s_l)
+            l_train.append(s_l.detach().cpu())
+            torch.cuda.empty_cache()
 
     network.eval()
     if verbose:
         pbar.close()
 
-    l_train = torch.stack(l_train).detach().cpu().tolist()
-    if visualize_loss:
-        sns.lineplot(data=l_train)
-        plt.ylabel("Loss"), plt.xlabel("Epochs")
-        plt.title("Training loss variations in function of the epochs")
-        plt.show()
-
+    l_train = torch.stack(l_train).tolist()
     assert l_train[-1] < 10, f"Error in fitting the data. " \
                              f"High training loss {l_train[-1]:.2f}." \
                              f"Try reducing the learning rate (current lr: {lr:.4f}"
     if l_train[-1] > 1.:
         print(f"Error in fitting the data. High training loss {l_train[-1]:.2f}."
               f"Try reducing the learning rate (current lr: {lr:.4f}")
+
+    if visualize_loss or l_train[-1] > 1.:
+        sns.lineplot(data=l_train)
+        plt.ylabel("Loss"), plt.xlabel("Epochs"), plt.yscale("log")
+        plt.title("Training loss variations in function of the epochs")
+        plt.show()
 
     return l_train
 
@@ -201,7 +208,7 @@ def predict(network, data: TensorDataset, batch_size=None, loss=None,
             p_t, logits = network(input_data, return_logits=True)
             preds.append(p_t.squeeze())
             if loss is not None:
-                l_val = loss(logits, target=labels)
+                l_val = loss(logits.squeeze(), target=labels.squeeze())
                 if len(l_val.shape) > 1:
                     l_val = l_val.sum(dim=1)
                 losses += l_val.cpu().numpy().tolist()
@@ -263,7 +270,7 @@ def predict_dropout_splits(network, data: TensorDataset, batch_size=None,
     return split_preds
 
 
-def evaluate(network: MLP, data: TensorDataset,
+def evaluate(network: MLP, data: Union[TensorDataset, Subset],
              batch_size=None, loss=torch.nn.BCELoss(reduction="none"),
              metric: Metric = None, device=torch.device("cpu"),
              return_preds=False) \
@@ -275,7 +282,8 @@ def evaluate(network: MLP, data: TensorDataset,
     if isinstance(data, TensorDataset):
         labels = data.tensors[1]
     elif isinstance(data, Subset):
-        labels = torch.as_tensor(data.dataset.targets[data.indices])
+        labels = torch.as_tensor(data.dataset.tensors[1][data.indices])
+        data = TensorDataset(data.dataset.tensors[0][data.indices], labels)
     else:
         labels = torch.as_tensor(data.targets)
 

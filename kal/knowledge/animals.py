@@ -1,3 +1,4 @@
+import random
 from typing import Tuple, Union
 
 import torch
@@ -6,10 +7,11 @@ from . import KnowledgeLoss
 
 
 class AnimalLoss(KnowledgeLoss):
-    def __init__(self, names, mu=1, uncertainty=False):
+    def __init__(self, names, mu=1, uncertainty=False, percentage=None):
         super().__init__(names)
         self.mu = mu
         self.uncertainty = uncertainty
+        self.percentage = percentage
 
     def __call__(self, output, targets=False, return_argmax=False, return_losses=False) \
             -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
@@ -52,7 +54,7 @@ class AnimalLoss(KnowledgeLoss):
         WHITE = output[:, 32]
 
         # here we converted each FOL rule using the product T-Norm (no-residual)
-        loss_fol_product_tnorm = [
+        losses = [
             # 0) HAIR => MAMMAL
             (HAIR * (1. - MAMMAL)),
             # 1) MILK => MAMMAL
@@ -109,17 +111,18 @@ class AnimalLoss(KnowledgeLoss):
                        (1 - LONGLEGS) * (1 - LONGNECK) * (1 - MAMMAL) * (1 - MEAT) * (1 - MILK) * (1 - POINTEDTEETH) *
                        (1 - SWIM) * (1 - TAWNY) * (1 - UNGULATE) * (1 - WHITE))
         ]
+        if self.percentage is not None:
+            n_rules = round(len(losses) * self.percentage // 100)
+            losses = random.sample(losses, k=n_rules)
 
         if self.uncertainty:
             unc_loss = 0
             for i in range(output.shape[1]):
                 unc_loss += output[:, i] * (1 - output[:, i])
-            loss_fol_product_tnorm.append(unc_loss)
+            losses.append(unc_loss)
 
-        losses = torch.stack(loss_fol_product_tnorm, dim=1)
+        losses = torch.stack(losses, dim=1)
         arg_max = torch.argmax(losses, dim=1)
-
-        # losses = torch.sum(losses, dim=1)
 
         loss_sum = torch.squeeze(torch.sum(losses, dim=1))
 

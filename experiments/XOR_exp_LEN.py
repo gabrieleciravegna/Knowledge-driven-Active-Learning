@@ -1,3 +1,4 @@
+from sklearn.tree import DecisionTreeClassifier
 
 if __name__ == "__main__":
 
@@ -26,14 +27,14 @@ if __name__ == "__main__":
     from torch.utils.data import TensorDataset
     from functools import partial
 
-    from knowledge.expl_to_loss import Expl_2_Loss
+    from kal.knowledge.expl_to_loss import Expl_2_Loss
 
     from kal.active_strategies import STRATEGIES, SAMPLING_STRATEGIES, ENTROPY_D, ENTROPY, ADV_DEEPFOOL, ADV_BIM, BALD, \
     KALS, DROPOUTS, RandomSampling, KAL_LEN_DROP_DU, KAL_LEN_DU, KAL_DU
     from kal.knowledge.xor import XORLoss, steep_sigmoid
     from kal.metrics import F1
     from kal.network import MLP, train_loop, evaluate, predict_dropout, predict, ELEN
-    from kal.utils import visualize_data_predictions, set_seed
+    from kal.utils import visualize_data_predictions, set_seed, tree_to_formula
 
     plt.rc('animation', html='jshtml')
     plt.close('all')
@@ -56,15 +57,15 @@ if __name__ == "__main__":
     dev = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
     print(f"Working on {dev}")
 
-    # strategies = STRATEGIES
-    strategies = [KAL_LEN_DU]
+    strategies = STRATEGIES
+    # strategies = [KAL_LEN_DU]
 
 
     # %% md
     #### Generating and visualizing data for the xor problem
     # %%
 
-    load = False
+    load = True
     tot_points = 100000
     first_points = 10
     n_points = 5
@@ -164,15 +165,15 @@ if __name__ == "__main__":
                 "Test Idx": []
             }
 
-            if strategy in [ADV_DEEPFOOL, ADV_BIM, ENTROPY, ENTROPY_D, BALD]:
+            if strategy in [ADV_DEEPFOOL, ADV_BIM, ENTROPY, ENTROPY_D, BALD, KAL_LEN_DU]:
                 n_classes = 2
                 x_train, y_train = x_t[train_idx], y_multi_t[train_idx]
                 x_test, y_test = x_t[test_idx], y_multi_t[test_idx]
                 # loss = torch.nn.CrossEntropyLoss(reduction="none")
             else:
                 n_classes = 1
-                x_train, y_train = x_t[train_idx], y_t[train_idx]
-                x_test, y_test = x_t[test_idx], y_t[test_idx]
+                x_train, y_train = x_t[train_idx], y_t[train_idx].unsqueeze(dim=1)
+                x_test, y_test = x_t[test_idx], y_t[test_idx].unsqueeze(dim=1)
 
             train_dataset = TensorDataset(x_train, y_train)
             test_dataset = TensorDataset(x_test, y_test)
@@ -184,8 +185,9 @@ if __name__ == "__main__":
 
             set_seed(0)
             net = MLP(n_classes, input_size, hidden_size, dropout=True).to(dev)
-            expl = ELEN(input_size=input_size, hidden_size=hidden_size,
-                        n_classes=2, dropout=True).to(dev)
+            # expl_model = ELEN(input_size=input_size, hidden_size=hidden_size,
+            #                   n_classes=2, dropout=True).to(dev)
+            expl_model = DecisionTreeClassifier()
 
             # first training with few randomly selected data
             losses = []
@@ -207,15 +209,21 @@ if __name__ == "__main__":
                 test_accuracy, sup_loss = evaluate(net, test_dataset, metric=metric,
                                                    loss=torch.nn.BCEWithLogitsLoss(reduction="none")
                                                    )
-                formulas = []
+                formulas, expl_accs = [], []
                 if "LEN" in strategy:
-                    multi_dataset = TensorDataset(x_train, y_multi_t[train_idx])
-                    train_loop(expl, multi_dataset, used_idx, epochs, lr=lr)
+                    # multi_dataset = TensorDataset(x_train, y_multi_t[train_idx])
+                    # train_loop(expl_model, multi_dataset, used_idx, epochs, lr=lr)
+                    expl_feats, expl_labels = x_train > 0.5, y_multi_t[train_idx]
+                    expl_model = expl_model.fit(expl_feats[used_idx], expl_labels[used_idx])
+                    expl_accs.append(expl_model.score(expl_feats, expl_labels))
                     for i in range(2):
-                        formula = expl.explain(x_train, y_multi_t[train_idx], used_idx,
-                                               feat_names, target_class=i)
+                        # formula = expl_model.explain(x_train, y_multi_t[train_idx], used_idx,
+                        #                              feat_names, target_class=it)
+                        formula = tree_to_formula(expl_model, feat_names, target_class=i)
                         formulas.append(formula)
-                    KLoss = partial(Expl_2_Loss, feat_names, formulas)
+                    assert it < 10 or expl_accs[0] > 0.9, "Error in training the explainer"
+
+                    KLoss = partial(Expl_2_Loss, feat_names, formulas, mutual_excl=True, double_imp=True)
                 else:
                     KLoss = XORLoss
 

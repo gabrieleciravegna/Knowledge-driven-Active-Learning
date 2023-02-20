@@ -354,7 +354,7 @@ def non_max_suppression(prediction, conf_thres=0.25, iou_thres=0.45, classes=Non
         if i.shape[0] > max_det:  # limit detections
             i = i[:max_det]
 
-        # output[xi] = to_cpu(x[i])
+        # output[xi] = to_cpu(x[it])
         output[xi] = x[i]
 
         if (time.time() - t) > time_limit:

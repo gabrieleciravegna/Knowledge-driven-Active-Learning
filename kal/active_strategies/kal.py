@@ -6,8 +6,8 @@ import seaborn as sns
 from matplotlib import pyplot as plt
 
 from kal.active_strategies.strategy import Strategy
-from kal.knowledge import KnowledgeLoss, XORLoss, IrisLoss
-from knowledge.expl_to_loss import Expl_2_Loss
+from kal.knowledge import KnowledgeLoss, XORLoss, IrisLoss, InsuranceLoss
+from kal.knowledge.expl_to_loss import Expl_2_Loss
 
 
 class KALSampling(Strategy):

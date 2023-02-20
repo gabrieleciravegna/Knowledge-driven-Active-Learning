@@ -121,7 +121,7 @@ if __name__ == "__main__":
 
     feature_file = os.path.join(data_folder, "ResNet50-TL-feats.pth")
     if os.path.isfile(feature_file):
-        x = torch.load(feature_file)
+        x = torch.load(feature_file, map_location=dev)
         y = dataset.targets
         y_multi = [CLASS_1_HOTS[dataset.classes[t]] for t in dataset.targets]
         print("Features loaded")
@@ -171,8 +171,8 @@ if __name__ == "__main__":
             if os.path.exists(df_file) and load:
                 df = pd.read_pickle(df_file)
                 dfs.append(df)
-                auc = df['Accuracy'].mean()
-                print(f"Already trained {df_file}, auc: {auc}")
+                auc = df['Test Accuracy'].mean()
+                print(f"Already trained {df_file}, auc: {auc:.2f}")
                 continue
 
             df = {
@@ -182,7 +182,8 @@ if __name__ == "__main__":
                 "Active Idx": [],
                 "Used Idx": [],
                 "Predictions": [],
-                "Accuracy": [],
+                "Train Accuracy": [],
+                "Test Accuracy": [],
                 "Supervision Loss": [],
                 "Active Loss": [],
                 "Explanations": [],
@@ -191,6 +192,7 @@ if __name__ == "__main__":
                 "Test Idx": []
             }
 
+            # Creating dataset for training and testing
             x_train, y_train = x_t[train_idx], y_t[train_idx]
             x_test, y_test = x_t[test_idx], y_t[test_idx]
             train_dataset = TensorDataset(x_train, y_train)
@@ -207,10 +209,11 @@ if __name__ == "__main__":
             used_idx = first_idx.copy()
             for it in (pbar := tqdm.trange(1, n_iterations + 1)):
                 t = time.time()
+
                 losses += train_loop(net, train_dataset, used_idx, epochs,
                                      lr=lr, loss=loss, device=dev)
-                preds_t = predict(net, train_dataset, device=dev)
-
+                train_accuracy, _, preds_t = evaluate(net, train_dataset, loss=loss,
+                                                      device=dev, return_preds=True)
                 if strategy in DROPOUTS:
                     preds_dropout = predict_dropout(net, train_dataset, device=dev)
                     assert (preds_dropout - preds_t).abs().sum() > .0, \
@@ -218,18 +221,20 @@ if __name__ == "__main__":
                 else:
                     preds_dropout = None
 
-                test_accuracy, sup_loss = evaluate(net, test_dataset,
-                                                   metric=metric, loss=loss)
+                test_accuracy, sup_loss = evaluate(net, test_dataset, metric=metric, loss=loss, device=dev)
+
                 formulas = []
                 KLoss = AnimalLoss
 
                 active_idx, active_loss = active_strategy.selection(preds_t, used_idx,
                                                                     n_points, labels=y_train,
                                                                     preds_dropout=preds_dropout,
-                                                                    clf=net, dataset=train_dataset)
-                if "LEN" in strategy:
-                    rand_idx, rand_loss = RandomSampling().selection(preds_t, used_idx, 2)
-                    active_idx = active_idx[:-rand_points] + rand_idx[:rand_points]
+                                                                    clf=net, dataset=train_dataset,
+                                                                    main_classes=main_classes)
+
+                if "LEN" in strategy and rand_points > 0:
+                    rand_idx, rand_loss = RandomSampling().selection(preds_t, used_idx, rand_points)
+                    active_idx = active_idx[:-rand_points] + rand_idx
 
                 used_idx += active_idx
 
@@ -239,7 +244,8 @@ if __name__ == "__main__":
                 df["Active Idx"].append(active_idx.copy())
                 df["Used Idx"].append(used_idx.copy())
                 df["Predictions"].append(preds_t.cpu().numpy())
-                df["Accuracy"].append(test_accuracy)
+                df["Train Accuracy"].append(train_accuracy)
+                df["Test Accuracy"].append(test_accuracy)
                 df["Supervision Loss"].append(sup_loss)
                 df["Active Loss"].append(active_loss.cpu().numpy())
                 df["Explanations"].append(formulas)
@@ -250,10 +256,12 @@ if __name__ == "__main__":
                 assert isinstance(used_idx, list), "Error"
 
                 pbar.set_description(f"{strategy} {seed + 1}/{seeds}, "
-                                     f"expl: {formulas}, "
-                                     f"auc: {np.mean(df['Accuracy']):.2f}, "
+                                     # f"expl: {formulas}, "
+                                     f"train acc: {np.mean(df['Train Accuracy']):.2f}, "
+                                     f"test acc: {np.mean(df['Test Accuracy']):.2f}, "
                                      f"s_l: {mean(sup_loss):.2f}, "
                                      f"l: {losses[-1]:.2f}, p: {len(used_idx)}")
+                print("")
 
             if seed == 0:
                 sns.lineplot(data=losses)
@@ -266,15 +274,16 @@ if __name__ == "__main__":
 
             df = pd.DataFrame(df)
             df.to_pickle(df_file)
+            # df.to_pickle(f"{df_file}_{now}")
             dfs.append(df)
 
     dfs = pd.concat(dfs)
     # dfs.to_pickle(f"{result_folder}\\metrics_{n_points}_points_{now}.pkl")
     dfs.to_pickle(f"{result_folder}\\results.pkl")
 
-    mean_auc = dfs.groupby("Strategy").mean().round(2)['Accuracy']
-    std_auc = dfs.groupby(["Strategy", "Seed"]).mean().groupby("Strategy").std().round(2)['Accuracy']
-    print("AUC", mean_auc, "+-", std_auc)
+    mean_auc = dfs.groupby("Strategy").mean().round(2)['Test Accuracy']
+    std_auc = dfs.groupby(["Strategy", "Seed"]).mean().groupby("Strategy").std().round(2)['Test Accuracy']
+    print("AUC", mean_auc.item(), "+-", std_auc.item())
     # %% md
 
     #### Displaying some pictures to visualize training
@@ -286,9 +295,9 @@ if __name__ == "__main__":
     # for strategy in strategies:
     #     # iterations = [10] if strategy != SUPERVISED else [15]
     #     iterations = [*range(1, 10)]
-    #     for i in iterations:
+    #     for it in iterations:
     #         print(f"Iteration {i}/{len(iterations)} {strategy} strategy")
     #         png_file = os.path.join(f"{image_folder}", f"{strategy}_{i}.png")
     #         # if not os.path.exists(png_file):
-    #         visualize_active_vs_sup_loss(x_t, i, strategy, dfs, png_file, )
+    #         visualize_active_vs_sup_loss(x_t, it, strategy, dfs, png_file, )
     #

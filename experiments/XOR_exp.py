@@ -1,3 +1,4 @@
+from functools import partial
 
 if __name__ == "__main__":
 
@@ -19,8 +20,6 @@ if __name__ == "__main__":
     from sklearn.model_selection import StratifiedKFold
     from sklearn.neighbors import LocalOutlierFactor
 
-    from kal.knowledge.knowledge_loss import CombinedLoss
-
     import matplotlib.pyplot as plt
     import numpy as np
     import pandas as pd
@@ -31,7 +30,7 @@ if __name__ == "__main__":
 
     from kal.active_strategies import STRATEGIES, SAMPLING_STRATEGIES, ENTROPY_D, ENTROPY, ADV_DEEPFOOL, ADV_BIM, BALD, \
     KAL_PLUS, KALS, UNCERTAINTY_D, MARGIN_D, DROPOUTS, KCENTER, NAME_MAPPINGS, RANDOM, NAME_MAPPINGS_LATEX, BALD2, \
-    KAL_DU, MARGIN, KAL_U, KAL_STAR_DROP_DU, KAL_STAR_DU
+    KAL_DU, MARGIN, KAL_U, KAL_STAR_DROP_DU, KAL_STAR_DU, KAL_PARTIAL, KAL_DU_50, KAL_DU_00
     from kal.knowledge.xor import XORLoss, steep_sigmoid
     from kal.metrics import MultiLabelAccuracy, F1
     from kal.network import MLP, train_loop, evaluate, predict_dropout, predict
@@ -60,7 +59,8 @@ if __name__ == "__main__":
 
     KLoss = XORLoss
     # strategies = [BALD, ENTROPY, ENTROPY_D]
-    strategies = STRATEGIES
+    # strategies = STRATEGIES
+    strategies = [KAL_DU_00, KAL_DU_50, KAL_DU]
     # strategies = KALS
     # strategies.pop(strategies.index(KCENTER))
     # strategies = KALS
@@ -134,10 +134,10 @@ if __name__ == "__main__":
         print("First idx", first_idx)
 
         for strategy in strategies:
-            active_strategy = SAMPLING_STRATEGIES[strategy](k_loss=KLoss, main_classes=[0, 1])
             df_file = os.path.join(result_folder, f"metrics_{n_points}_points_"
                                                   f"{seed}_seed_{strategy}_strategy.pkl")
-            if os.path.exists(df_file) and load:
+            if os.path.exists(df_file) and load and \
+                    strategy != KAL_DU_00 and strategy != KAL_DU_50:
                 df = pd.read_pickle(df_file)
                 dfs.append(df)
                 df_first_idx = df['Used Idx'][0][:first_points]
@@ -173,15 +173,21 @@ if __name__ == "__main__":
 
             train_dataset = TensorDataset(x_train, y_train)
             test_dataset = TensorDataset(x_test, y_test)
-            if strategy in [KAL_STAR_DU, KAL_STAR_DROP_DU]:
-                loss = CombinedLoss(KLoss)
-            else:
-                loss = torch.nn.BCEWithLogitsLoss(reduction="none")
+
+            loss = torch.nn.BCEWithLogitsLoss(reduction="none")
             metric = F1()
 
             set_seed(0)
             net = MLP(input_size=input_size, hidden_size=hidden_size,
                       n_classes=num_classes, dropout=True).to(dev)
+
+            if "0" in strategy or "25" in strategy or "50" in strategy or "75" in strategy:
+                percentage = int(strategy[-2:])
+            else:
+                percentage = None
+            KLoss = partial(XORLoss, percentage=percentage)
+            active_strategy = SAMPLING_STRATEGIES[strategy](k_loss=KLoss,
+                                                            main_classes=[0, 1])
 
             # first training with few randomly selected data
             losses = []
@@ -245,9 +251,12 @@ if __name__ == "__main__":
             dfs.append(df)
 
     dfs = pd.concat(dfs)
-    # dfs.to_pickle(f"{result_folder}\\metrics_{n_points}_points_{now}.pkl")
-    dfs.to_pickle(f"{result_folder}\\results.pkl")
+    dfs.to_pickle(f"{result_folder}\\metrics_{n_points}_points_{now}.pkl")
+    # dfs.to_pickle(f"{result_folder}\\results.pkl")
 
+    mean_auc = dfs.groupby("Strategy").mean().round(2)['Accuracy']
+    std_auc = dfs.groupby(["Strategy", "Seed"]).mean().groupby("Strategy").std().round(2)['Accuracy']
+    print("AUC", mean_auc, "+-", std_auc)
     # %%
 
     dfs = pd.read_pickle(f"{result_folder}\\results.pkl")
@@ -262,9 +271,9 @@ if __name__ == "__main__":
     #
     # rows = []
     # Strategies = []
-    # for i, row in dfs.iterrows():
+    # for it, row in dfs.iterrows():
     #     if row['Points'] > (n_points * n_iterations + first_points):
-    #         dfs = dfs.drop(i)
+    #         dfs = dfs.drop(it)
     #     else:
     #         Strategies.append(NAME_MAPPINGS_LATEX[row['Strategy']])
     # dfs['Strategy'] = Strategies
@@ -350,7 +359,7 @@ if __name__ == "__main__":
             rc={'figure.figsize': (6, 5)})
     # for seed in range(seeds):
     for seed in [4]:
-        for strategy in STRATEGIES:
+        for strategy in strategies:
             if strategy in DROPOUTS:
                 continue
             iterations = [0, 4, 9, 19]

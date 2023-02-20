@@ -12,9 +12,13 @@ def steep_sigmoid(x: torch.Tensor, k=100., b=0.5) -> torch.Tensor:
 
 
 class XORLoss(KnowledgeLoss):
-    def __init__(self, uncertainty: bool = False):
+    def __init__(self, uncertainty: bool = False, percentage: bool = None):
         super().__init__()
         self.uncertainty = uncertainty
+        if percentage is not None:
+            assert percentage in [0, 50, 100], \
+                f"Error in the required percentage of knowledge ({percentage} %), available values: 0 %, 50 %, 100 %"
+        self.percentage = percentage
 
     # (x1 & ~x2) | (x2 & ~x1) <=> f
     # => f -> (x1 & ~x2) | (~x1 & x2)
@@ -44,6 +48,14 @@ class XORLoss(KnowledgeLoss):
         assert x is not None, "Must pass input data to compute " \
                               "the rule violation loss on this dataset"
 
+        if self.percentage is not None:
+            if self.percentage == 0:
+                return XORLossNone(self.uncertainty)\
+                    (output, x, return_argmax, return_losses)
+            elif self.percentage == 50:
+                return XORLossX1ANDNOTX2(self.uncertainty)\
+                    (output, x, return_argmax, return_losses)
+
         if len(output.shape) > 1:
             output = output[:, 1]
         discrete_x = steep_sigmoid(x).float()
@@ -52,11 +64,14 @@ class XORLoss(KnowledgeLoss):
         cons_loss1 = output * ((1 - (x1 * (1 - x2))) * (1 - (x2 * (1 - x1))))
         cons_loss2 = (1 - ((1 - (x1 * (1 - x2))) * (1 - (x2 * (1 - x1))))) * (1 - output)
         cons_loss3 = output * (1 - output)
+        c_losses = [cons_loss1, cons_loss2]
+
+        if self.percentage is not None:
+            n_rules = round(len(c_losses) * self.percentage // 100)
+            c_losses = c_losses[:n_rules]
 
         if self.uncertainty:
-            c_losses = [cons_loss1, cons_loss2, cons_loss3]
-        else:
-            c_losses = [cons_loss1, cons_loss2]
+            c_losses.append(cons_loss3)
 
         losses = torch.stack(c_losses, dim=1)
         arg_max = torch.argmax(losses, dim=1)
