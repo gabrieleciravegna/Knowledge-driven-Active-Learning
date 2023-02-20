@@ -5,6 +5,7 @@ import seaborn as sns
 from .adv_bim import AdversarialBIMSampling
 from .adv_deepfool import AdversarialDeepFoolSampling
 from .entropy import EntropySampling, EntropyDropoutSampling
+from .kal_len import KALLENDiversityUncSampling, KALLENDropDiversityUncSampling
 from .kal_plus import KALPlusSampling, KALPlusSamplingSVM, KALPlusSamplingTree, KALPlusSamplingLOF, \
     KALPlusUncDiversitySampling, KALPlusDiversitySampling, KALPlusUncSampling, KALPlusDropSampling, \
     KALPlusDropUncSampling, KALPlusDropDiversitySampling, KALPlusDropDiversityUncSampling
@@ -177,8 +178,8 @@ SAMPLING_STRATEGIES: Dict[str, Callable[..., Strategy]] = {
     KAL_DROP_DU: KALDropDiversityUncSampling,
     KAL_STAR_DU: KALDiversityUncSampling,
     KAL_STAR_DROP_DU: KALDropDiversityUncSampling,
-    KAL_LEN_DU: KALDiversityUncSampling,
-    KAL_LEN_DROP_DU: KALDropDiversityUncSampling,
+    KAL_LEN_DU: KALLENDiversityUncSampling,
+    KAL_LEN_DROP_DU: KALLENDropDiversityUncSampling,
     KAL_PLUS: KALPlusSampling,
     KAL_PLUS_U: KALPlusUncSampling,
     KAL_PLUS_D: KALPlusDiversitySampling,

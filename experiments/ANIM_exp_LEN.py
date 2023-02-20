@@ -37,7 +37,7 @@ if __name__ == "__main__":
     from tqdm import trange
     from sklearn.model_selection import StratifiedKFold
 
-    from kal.active_strategies import SAMPLING_STRATEGIES, ADV_DEEPFOOL, KALS, DROPOUTS, KAL_LEN_DU
+    from kal.active_strategies import SAMPLING_STRATEGIES, ADV_DEEPFOOL, KALS, DROPOUTS, KAL_LEN_DU, KAL_LEN_DROP_DU
     from kal.network import MLP, train_loop, evaluate, predict, predict_dropout, ELEN
     from kal.utils import set_seed
 
@@ -45,7 +45,6 @@ if __name__ == "__main__":
     from kal.metrics import F1
     from kal.knowledge import AnimalLoss
     from active_strategies import RandomSampling, KAL_LEN
-    from knowledge.expl_to_loss import Expl_2_Loss_CV
 
     plt.rc('animation', html='jshtml')
 
@@ -85,7 +84,7 @@ if __name__ == "__main__":
     print("Rand points", rand_points)
 
     # strategies = [BALD]
-    strategies = [KAL_LEN_DU]
+    strategies = [KAL_LEN_DU, KAL_LEN_DROP_DU]
     # # strategies.pop(strategies.index(KMEANS))
     # # strategies.pop(strategies.index(KCENTER))
     # strategies.pop(strategies.index(ADV_DEEPFOOL))
@@ -162,7 +161,11 @@ if __name__ == "__main__":
 
         for strategy in strategies:
             active_strategy = SAMPLING_STRATEGIES[strategy](k_loss=KLoss,
-                                                            main_classes=main_classes)
+                                                            main_classes=main_classes,
+                                                            rand_points=rand_points,
+                                                            hidden_size=hidden_size,
+                                                            dev=dev, cv=True,
+                                                            class_names=class_names)
             df_file = os.path.join(result_folder, f"metrics_{n_points}_points_"
                                                   f"{seed}_seed_{strategy}_strategy.pkl")
             if os.path.exists(df_file) and load:
@@ -198,8 +201,6 @@ if __name__ == "__main__":
 
             set_seed(0)
             net = MLP(n_classes, input_size, hidden_size, dropout=True).to(dev)
-            expl = [ELEN(input_size=n_classes-1, hidden_size=hidden_size,
-                         n_classes=1, dropout=True).to(dev) for _ in range(n_classes)]
 
             # first training with few randomly selected data
             losses = []
@@ -220,23 +221,10 @@ if __name__ == "__main__":
                 test_accuracy, sup_loss = evaluate(net, test_dataset,
                                                    metric=metric, loss=loss)
                 formulas = []
-                if "LEN" in strategy:
-                    for i in range(n_classes):
-                        expl_feats = torch.cat([y_train[:, :i], y_train[:, i+1:]], dim=1)
-                        expl_label = y_train[:, i].unsqueeze(dim=1)
-                        expl_names = class_names[:i] + class_names[i+1:]
-                        expl_dataset = TensorDataset(expl_feats, expl_label)
-                        train_loop(expl[i], expl_dataset, used_idx, epochs, lr=lr)
-                        formula = expl[i].explain(expl_feats, expl_label, used_idx,
-                                                  expl_names, target_class=0)
-                        formulas.append(formula)
-                    KLoss = partial(Expl_2_Loss_CV, class_names, formulas)
-                else:
-                    KLoss = AnimalLoss
+                KLoss = AnimalLoss
 
-                active_strategy = SAMPLING_STRATEGIES[strategy](k_loss=KLoss, main_classes=[0, 1])
                 active_idx, active_loss = active_strategy.selection(preds_t, used_idx,
-                                                                    n_points, labels=y_t[train_idx],
+                                                                    n_points, labels=y_train,
                                                                     preds_dropout=preds_dropout,
                                                                     clf=net, dataset=train_dataset)
                 if "LEN" in strategy:

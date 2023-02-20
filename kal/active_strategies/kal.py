@@ -11,18 +11,17 @@ from knowledge.expl_to_loss import Expl_2_Loss
 
 
 class KALSampling(Strategy):
-    def __init__(self, k_loss: Callable[..., KnowledgeLoss], **kwargs):
+    def __init__(self, k_loss: Callable[..., KnowledgeLoss], cv=False, **kwargs):
         super(KALSampling, self).__init__()
         self.k_loss = k_loss(uncertainty=False)
         self.dropout = False
+        self.cv = cv
 
     def loss(self, preds, *args, x=None, preds_dropout=None, return_argmax=False, **kwargs):
-        if isinstance(self.k_loss, IrisLoss) \
-                or isinstance(self.k_loss, XORLoss) \
-                or isinstance(self.k_loss, Expl_2_Loss):
-            c_loss, arg_max = self.k_loss(preds, x=x, return_argmax=True)
-        else:
+        if self.cv:
             c_loss, arg_max = self.k_loss(preds, return_argmax=True)
+        else:
+            c_loss, arg_max = self.k_loss(preds, x=x, return_argmax=True)
 
         if return_argmax:
             return c_loss, arg_max
