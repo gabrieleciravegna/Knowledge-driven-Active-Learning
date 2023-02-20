@@ -44,7 +44,6 @@ if __name__ == "__main__":
     from data.Animals import CLASS_1_HOTS, classes
     from kal.metrics import F1
     from kal.knowledge import AnimalLoss
-    from active_strategies import RandomSampling, KAL_LEN
 
     plt.rc('animation', html='jshtml')
 
@@ -230,11 +229,7 @@ if __name__ == "__main__":
                                                                     n_points, labels=y_train,
                                                                     preds_dropout=preds_dropout,
                                                                     clf=net, dataset=train_dataset,
-                                                                    main_classes=main_classes)
-
-                if "LEN" in strategy and rand_points > 0:
-                    rand_idx, rand_loss = RandomSampling().selection(preds_t, used_idx, rand_points)
-                    active_idx = active_idx[:-rand_points] + rand_idx
+                                                                    )
 
                 used_idx += active_idx
 

@@ -14,7 +14,6 @@ class KALSampling(Strategy):
     def __init__(self, k_loss: Callable[..., KnowledgeLoss], cv=False, **kwargs):
         super(KALSampling, self).__init__()
         self.k_loss = k_loss(uncertainty=False)
-        self.dropout = False
         self.cv = cv
 
     def loss(self, preds, *args, x=None, preds_dropout=None, return_argmax=False, **kwargs):
@@ -111,9 +110,10 @@ class KALSampling(Strategy):
 
 
 class KALUncSampling(KALSampling):
-    def __init__(self, k_loss: Callable[..., KnowledgeLoss], **kwargs):
+    def __init__(self, k_loss: Callable[..., KnowledgeLoss], cv=False, **kwargs):
         super(KALSampling, self).__init__()
         self.k_loss = k_loss(uncertainty=True)
+        self.cv = cv
 
 
 class KALDiversitySampling(KALSampling):
@@ -125,9 +125,10 @@ class KALDiversitySampling(KALSampling):
 
 
 class KALDiversityUncSampling(KALDiversitySampling):
-    def __init__(self, k_loss: Callable[..., KnowledgeLoss], **kwargs):
+    def __init__(self, k_loss: Callable[..., KnowledgeLoss], cv=False, **kwargs):
         super(KALSampling, self).__init__()
         self.k_loss = k_loss(uncertainty=True)
+        self.cv = cv
 
 
 class KALDropSampling(KALSampling):
@@ -139,9 +140,10 @@ class KALDropSampling(KALSampling):
 
 
 class KALDropUncSampling(KALDropSampling):
-    def __init__(self, k_loss: Callable[..., KnowledgeLoss], **kwargs):
+    def __init__(self, k_loss: Callable[..., KnowledgeLoss], cv=False, **kwargs):
         super(KALSampling, self).__init__()
         self.k_loss = k_loss(uncertainty=True)
+        self.cv = cv
 
 
 class KALDropDiversitySampling(KALDropSampling):
@@ -153,9 +155,10 @@ class KALDropDiversitySampling(KALDropSampling):
 
 
 class KALDropDiversityUncSampling(KALDropSampling):
-    def __init__(self, k_loss: Callable[..., KnowledgeLoss], **kwargs):
+    def __init__(self, k_loss: Callable[..., KnowledgeLoss], cv=False, **kwargs):
         super(KALSampling, self).__init__()
         self.k_loss = k_loss(uncertainty=True)
+        self.cv = cv
 
     def selection(self, *args, **kwargs) -> Tuple[List, torch.Tensor]:
         if "diversity" in kwargs:

@@ -13,3 +13,7 @@ results/
 /kal/old/
 /kal/active_strategies/old/
 /old/
+/Code.zip
+*.weights
+*.cfg
+

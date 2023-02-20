@@ -1,4 +1,3 @@
-from sklearn.tree import DecisionTreeClassifier
 
 if __name__ == "__main__":
 
@@ -25,16 +24,13 @@ if __name__ == "__main__":
     import torch
     import tqdm
     from torch.utils.data import TensorDataset
-    from functools import partial
-
-    from kal.knowledge.expl_to_loss import Expl_2_Loss
 
     from kal.active_strategies import STRATEGIES, SAMPLING_STRATEGIES, ENTROPY_D, ENTROPY, ADV_DEEPFOOL, ADV_BIM, BALD, \
-    KALS, DROPOUTS, RandomSampling, KAL_LEN_DROP_DU, KAL_LEN_DU, KAL_DU
+    KALS, DROPOUTS, KAL_LEN_DROP_DU, KAL_LEN_DU, KAL_DU, KAL_DROP_DU
     from kal.knowledge.xor import XORLoss, steep_sigmoid
     from kal.metrics import F1
-    from kal.network import MLP, train_loop, evaluate, predict_dropout, predict, ELEN
-    from kal.utils import visualize_data_predictions, set_seed, tree_to_formula
+    from kal.network import MLP, train_loop, evaluate, predict_dropout, predict
+    from kal.utils import visualize_data_predictions, set_seed
 
     plt.rc('animation', html='jshtml')
     plt.close('all')
@@ -57,15 +53,15 @@ if __name__ == "__main__":
     dev = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
     print(f"Working on {dev}")
 
-    strategies = STRATEGIES
-    # strategies = [KAL_LEN_DU]
+    # strategies = STRATEGIES
+    strategies = [KAL_LEN_DROP_DU]
 
 
     # %% md
     #### Generating and visualizing data for the xor problem
     # %%
 
-    load = True
+    load = False
     tot_points = 100000
     first_points = 10
     n_points = 5
@@ -135,6 +131,13 @@ if __name__ == "__main__":
         print("First idx", first_idx)
 
         for strategy in strategies:
+            active_strategy = SAMPLING_STRATEGIES[strategy](k_loss=XORLoss,
+                                                            main_classes=[0],
+                                                            rand_points=rand_points,
+                                                            hidden_size=hidden_size,
+                                                            dev=dev, cv=False,
+                                                            class_names=["x0", "x1"],
+                                                            mutual_excl=True, double_imp=True)
             df_file = os.path.join(result_folder, f"metrics_{n_points}_points_"
                                                   f"{seed}_seed_{strategy}_strategy.pkl")
             if os.path.exists(df_file) and load:  # and "LEN" not in strategy:
@@ -159,17 +162,15 @@ if __name__ == "__main__":
                 "Accuracy": [],
                 "Supervision Loss": [],
                 "Active Loss": [],
-                "Explanations": [],
                 "Time": [],
                 "Train Idx": [],
                 "Test Idx": []
             }
 
-            if strategy in [ADV_DEEPFOOL, ADV_BIM, ENTROPY, ENTROPY_D, BALD, KAL_LEN_DU]:
+            if strategy in [ADV_DEEPFOOL, ADV_BIM, ENTROPY, ENTROPY_D, BALD, KAL_LEN_DU, KAL_LEN_DROP_DU]:
                 n_classes = 2
                 x_train, y_train = x_t[train_idx], y_multi_t[train_idx]
                 x_test, y_test = x_t[test_idx], y_multi_t[test_idx]
-                # loss = torch.nn.CrossEntropyLoss(reduction="none")
             else:
                 n_classes = 1
                 x_train, y_train = x_t[train_idx], y_t[train_idx].unsqueeze(dim=1)
@@ -177,17 +178,11 @@ if __name__ == "__main__":
 
             train_dataset = TensorDataset(x_train, y_train)
             test_dataset = TensorDataset(x_test, y_test)
-            # if strategy in [KAL_STAR_DU, KAL_ STAR_DROP_DU]:
-            #     loss = CombinedLoss(KLoss)
-            # else:
             loss = torch.nn.BCEWithLogitsLoss(reduction="none")
             metric = F1()
 
             set_seed(0)
             net = MLP(n_classes, input_size, hidden_size, dropout=True).to(dev)
-            # expl_model = ELEN(input_size=input_size, hidden_size=hidden_size,
-            #                   n_classes=2, dropout=True).to(dev)
-            expl_model = DecisionTreeClassifier()
 
             # first training with few randomly selected data
             losses = []
@@ -207,35 +202,12 @@ if __name__ == "__main__":
                     preds_dropout = None
 
                 test_accuracy, sup_loss = evaluate(net, test_dataset, metric=metric,
-                                                   loss=torch.nn.BCEWithLogitsLoss(reduction="none")
-                                                   )
-                formulas, expl_accs = [], []
-                if "LEN" in strategy:
-                    # multi_dataset = TensorDataset(x_train, y_multi_t[train_idx])
-                    # train_loop(expl_model, multi_dataset, used_idx, epochs, lr=lr)
-                    expl_feats, expl_labels = x_train > 0.5, y_multi_t[train_idx]
-                    expl_model = expl_model.fit(expl_feats[used_idx], expl_labels[used_idx])
-                    expl_accs.append(expl_model.score(expl_feats, expl_labels))
-                    for i in range(2):
-                        # formula = expl_model.explain(x_train, y_multi_t[train_idx], used_idx,
-                        #                              feat_names, target_class=it)
-                        formula = tree_to_formula(expl_model, feat_names, target_class=i)
-                        formulas.append(formula)
-                    assert it < 10 or expl_accs[0] > 0.9, "Error in training the explainer"
-
-                    KLoss = partial(Expl_2_Loss, feat_names, formulas, mutual_excl=True, double_imp=True)
-                else:
-                    KLoss = XORLoss
-
-                active_strategy = SAMPLING_STRATEGIES[strategy](k_loss=KLoss, main_classes=[0, 1])
+                                                   loss=torch.nn.BCEWithLogitsLoss(reduction="none"))
                 active_idx, active_loss = active_strategy.selection(preds_t, used_idx,
                                                                     n_points, x=x_t[train_idx],
                                                                     labels=y_t[train_idx],
                                                                     preds_dropout=preds_dropout,
                                                                     clf=net, dataset=train_dataset)
-                if "LEN" in strategy and rand_points > 0:
-                    rand_idx, rand_loss = RandomSampling().selection(preds_t, used_idx, rand_points)
-                    active_idx = active_idx[:-rand_points] + rand_idx
 
                 used_idx += active_idx
 
@@ -248,7 +220,6 @@ if __name__ == "__main__":
                 df["Accuracy"].append(test_accuracy)
                 df["Supervision Loss"].append(sup_loss)
                 df["Active Loss"].append(active_loss.cpu().numpy())
-                df["Explanations"].append(formulas)
                 df["Time"].append((time.time() - t))
                 df["Train Idx"].append(train_idx)
                 df["Test Idx"].append(test_idx)
@@ -256,10 +227,10 @@ if __name__ == "__main__":
                 assert isinstance(used_idx, list), "Error"
 
                 pbar.set_description(f"{strategy} {seed + 1}/{seeds}, "
-                                     f"expl: {formulas}, "
                                      f"auc: {np.mean(df['Accuracy']):.2f}, "
                                      f"s_l: {mean(sup_loss):.2f}, "
                                      f"l: {losses[-1]:.2f}, p: {len(used_idx)}")
+                print("")
 
             if seed == 0:
                 sns.lineplot(data=losses)
@@ -275,8 +246,8 @@ if __name__ == "__main__":
             dfs.append(df)
 
     dfs = pd.concat(dfs)
-    # dfs.to_pickle(f"{result_folder}\\metrics_{n_points}_points_{now}.pkl")
-    dfs.to_pickle(f"{result_folder}\\results.pkl")
+    dfs.to_pickle(f"{result_folder}\\metrics_{n_points}_points_{now}.pkl")
+    # dfs.to_pickle(f"{result_folder}\\results.pkl")
 
     mean_auc = dfs.groupby("Strategy").mean().round(2)['Accuracy']
     std_auc = dfs.groupby(["Strategy", "Seed"]).mean().groupby("Strategy").std().round(2)['Accuracy']

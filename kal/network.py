@@ -95,41 +95,6 @@ class MLP(torch.nn.Module):
         return output
 
 
-class ELEN(MLP):
-    def __init__(self, *args, **kwargs):
-        super(ELEN, self).__init__(*args, **kwargs)
-        self.fc1 = EntropyLinear(self.input_size, self.hidden_size,
-                                 self.n_classes, temperature=1)
-        self.fc2 = torch.nn.Linear(self.hidden_size, 1)
-
-    def forward(self, input_x: torch.Tensor, return_logits=False) -> Union[Tuple[Tensor, Tensor], Tensor]:
-        hidden = self.fc1(input_x)
-        relu = self.relu(hidden)
-
-        if self.dropout:
-            dropout = F.dropout(relu, p=self.dropout_rate)
-        else:
-            dropout = relu
-        logits = self.fc2(dropout).squeeze(-1)
-        output = self.activation(logits)
-
-        if return_logits:
-            return output, logits
-        return output
-
-    def explain(self, x, y, train_idx, feat_names, target_class, return_acc=False):
-        x_train = x[train_idx]
-        y_train = y[train_idx]
-        train_mask = torch.ones(len(train_idx), dtype=bool)
-        expl_raw = explain_class(self, x_train, y_train, train_mask, train_mask,
-                                 target_class=target_class, y_threshold=0.5, try_all=False)[0]
-        expl = replace_names(expl_raw, feat_names)
-        if return_acc:
-            accuracy, _ = test_explanation(expl_raw, x.cpu(), y.cpu(), target_class)
-            return expl, accuracy
-        return expl
-
-
 def train_loop(network: torch.nn.Module, data: TensorDataset, train_idx: List,
                epochs: int = 100, batch_size=None, lr=1e-2,
                loss=torch.nn.BCEWithLogitsLoss(reduction="none"),
