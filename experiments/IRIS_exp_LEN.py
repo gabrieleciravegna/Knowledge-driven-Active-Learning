@@ -1,4 +1,3 @@
-
 if __name__ == "__main__":
 
     # %% md
@@ -13,17 +12,15 @@ if __name__ == "__main__":
     import datetime
     import random
     import time
-    from functools import partial
     from statistics import mean
-
-    from sklearn import tree
     from sklearn.datasets import load_iris
     from sklearn.metrics import f1_score
-    from sklearn.model_selection import train_test_split, StratifiedKFold
     from sklearn.preprocessing import MinMaxScaler, OneHotEncoder
 
     from kal.knowledge import IrisLoss
-    from kal.utils import visualize_data_predictions, set_seed, tree_to_formula
+
+
+    from sklearn.model_selection import StratifiedKFold
 
     import matplotlib.pyplot as plt
     import numpy as np
@@ -32,16 +29,13 @@ if __name__ == "__main__":
     import torch
     import tqdm
     from torch.utils.data import TensorDataset
-    from functools import partial
 
-    from kal.knowledge.expl_to_loss import Expl_2_Loss
-
-    from kal.active_strategies import SAMPLING_STRATEGIES, DROPOUTS, KAL_LEN_DU
+    from kal.active_strategies import STRATEGIES, SAMPLING_STRATEGIES, ENTROPY_D, ENTROPY, ADV_DEEPFOOL, ADV_BIM, BALD, \
+        KALS, DROPOUTS, KAL_LEN_DROP_DU, KAL_LEN_DU, KAL_DU, KAL_DROP_DU
     from kal.knowledge.xor import XORLoss, steep_sigmoid
     from kal.metrics import F1
-    from kal.network import MLP, train_loop, evaluate, predict_dropout, predict, ELEN
-    from kal.active_strategies import RandomSampling
-    from sklearn.tree import DecisionTreeClassifier
+    from kal.network import MLP, train_loop, evaluate, predict_dropout, predict
+    from kal.utils import visualize_data_predictions, set_seed
 
     plt.rc('animation', html='jshtml')
     plt.close('all')
@@ -64,6 +58,9 @@ if __name__ == "__main__":
     dev = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
     print(f"Working on {dev}")
 
+    # strategies = STRATEGIES
+    strategies = [KAL_LEN_DU, KAL_LEN_DROP_DU]
+
     # %% md
 
     #### Loading data for the IRIS dataset
@@ -79,15 +76,6 @@ if __name__ == "__main__":
 
     x = MinMaxScaler().fit_transform(X)
     y = OneHotEncoder(sparse=False).fit_transform(Y.reshape(-1, 1))
-    clf = tree.DecisionTreeClassifier(max_depth=2, random_state=1234)
-    x_train, x_test, y_train, y_test = train_test_split(x, y, random_state=1234)
-    model = clf.fit(x_train, y_train)
-    y_pred = model.predict(x_test)
-    print("Tree Accuracy:", f1_score(y_test, y_pred, average="macro") * 100)
-    text_representation = tree.export_text(model, feature_names=feat_names)
-    print(text_representation)
-
-    # %%
 
     x_t = torch.FloatTensor(x)
     y_t = torch.FloatTensor(y)
@@ -97,31 +85,31 @@ if __name__ == "__main__":
     input_size = x.shape[1]
     n_classes = y.shape[1]
 
+    KLoss = IrisLoss
     load = False
     first_points = 5
     n_points = 5
+    rand_points
     n_iterations = (75 - first_points) // n_points
     seeds = 10  #
     lr = 3 * 1e-3
     epochs = 200
     hidden_size = 100
 
-    KLoss = partial(IrisLoss, names=class_names)
     # strategies = STRATEGIES
     strategies = [KAL_LEN_DU]
     # strategies = DROPOUTS
     print("Strategies:", strategies)
     print("n_points", n_points, "n_iterations", n_iterations)
-
     #%% md
 
     #### Visualizing iris data
 
     #%%
 
-    sns.scatterplot(x=x[:, 2], y=x[:, 3], hue=Y)
-    plt.savefig(f"{image_folder}\\data_labelling.png")
-    plt.show()
+    # sns.scatterplot(x=x[:, 2], y=x[:, 3], hue=Y)
+    # plt.savefig(f"{image_folder}\\data_labelling.png")
+    # plt.show()
 
     # %% md
     #### Defining constraints as product t-norm of the FOL rule expressing the XOR
@@ -146,9 +134,9 @@ if __name__ == "__main__":
 
     pred_rule = calculate_rule_prediction(x_t)
     print("Rule Accuracy:", f1_score(y_t, pred_rule > 0.5, average="macro") * 100)
-    sns.scatterplot(x=x_t[:, 2].numpy(), y=x_t[:, 3].numpy(), hue=pred_rule.argmax(dim=1),
-                    style=y_t.argmax(dim=1) == pred_rule.argmax(dim=1))
-    plt.show()
+    # sns.scatterplot(x=x_t[:, 2].numpy(), y=x_t[:, 3].numpy(), hue=pred_rule.argmax(dim=1),
+    #                 style=y_t.argmax(dim=1) == pred_rule.argmax(dim=1))
+    # plt.show()
 
 
     #### Active Learning Strategy Comparison
@@ -163,7 +151,12 @@ if __name__ == "__main__":
 
         for strategy in strategies:
             active_strategy = SAMPLING_STRATEGIES[strategy](k_loss=KLoss,
-                                                            main_classes=[0, 1, 2])
+                                                            main_classes=[0],
+                                                            rand_points=rand_points,
+                                                            hidden_size=hidden_size,
+                                                            dev=dev, cv=False,
+                                                            class_names=feat_names,
+                                                            mutual_excl=True, double_imp=True)
             df_file = os.path.join(result_folder, f"metrics_{n_points}_points_"
                                                   f"{seed}_seed_{strategy}_strategy.pkl")
             if os.path.exists(df_file) and load:
@@ -183,7 +176,6 @@ if __name__ == "__main__":
                 "Accuracy": [],
                 "Supervision Loss": [],
                 "Active Loss": [],
-                "Explanations": [],
                 "Time": [],
                 "Train Idx": [],
                 "Test Idx": []
@@ -199,9 +191,6 @@ if __name__ == "__main__":
 
             set_seed(0)
             net = MLP(n_classes, input_size, hidden_size, dropout=True).to(dev)
-            # expl_model = ELEN(input_size=input_size, hidden_size=hidden_size,
-            #                   n_classes=n_classes, dropout=True).to(dev)
-            expl_model = DecisionTreeClassifier()
 
             # first training with few randomly selected data
             losses = []
@@ -221,32 +210,12 @@ if __name__ == "__main__":
                     preds_dropout = None
 
                 test_accuracy, sup_loss = evaluate(net, test_dataset, metric=metric,
-                                                   loss=torch.nn.BCEWithLogitsLoss(reduction="none")
-                                                   )
-                formulas, expl_accs = [], []
-                if "LEN" in strategy:
-                    expl_feats, expl_labels = x_train > 0.5, y_t[train_idx]
-                    expl_model = expl_model.fit(expl_feats[used_idx], expl_labels[used_idx])
-                    expl_accs.append(expl_model.score(expl_feats, expl_labels))
-                    for i in range(2):
-                        # formula = expl_model.explain(x_train, y_multi_t[train_idx], used_idx,
-                        #                              feat_names, target_class=it)
-                        formula = tree_to_formula(expl_model, feat_names, target_class=i)
-                        formulas.append(formula)
-                    assert it < 10 or expl_accs[0] > 0.2, "Error in training the explainer"
-                    KLoss = partial(Expl_2_Loss, feat_names, formulas, mutual_excl=True, double_imp=True)
-                else:
-                    KLoss = XORLoss
-
-                active_strategy = SAMPLING_STRATEGIES[strategy](k_loss=KLoss, main_classes=[0, 1])
+                                                   loss=torch.nn.BCEWithLogitsLoss(reduction="none"))
                 active_idx, active_loss = active_strategy.selection(preds_t, used_idx,
                                                                     n_points, x=x_t[train_idx],
                                                                     labels=y_t[train_idx],
                                                                     preds_dropout=preds_dropout,
                                                                     clf=net, dataset=train_dataset)
-                if "LEN" in strategy:
-                    rand_idx, rand_loss = RandomSampling().selection(preds_t, used_idx, 2)
-                    active_idx = active_idx[:-2] + rand_idx[:2]
 
                 used_idx += active_idx
 
@@ -259,7 +228,6 @@ if __name__ == "__main__":
                 df["Accuracy"].append(test_accuracy)
                 df["Supervision Loss"].append(sup_loss)
                 df["Active Loss"].append(active_loss.cpu().numpy())
-                df["Explanations"].append(formulas)
                 df["Time"].append((time.time() - t))
                 df["Train Idx"].append(train_idx)
                 df["Test Idx"].append(test_idx)
@@ -267,10 +235,10 @@ if __name__ == "__main__":
                 assert isinstance(used_idx, list), "Error"
 
                 pbar.set_description(f"{strategy} {seed + 1}/{seeds}, "
-                                     f"expl_acc: {np.mean(expl_accs)}, "
                                      f"auc: {np.mean(df['Accuracy']):.2f}, "
                                      f"s_l: {mean(sup_loss):.2f}, "
                                      f"l: {losses[-1]:.2f}, p: {len(used_idx)}")
+                print("")
 
             if seed == 0:
                 sns.lineplot(data=losses)
@@ -292,6 +260,7 @@ if __name__ == "__main__":
     mean_auc = dfs.groupby("Strategy").mean().round(2)['Accuracy']
     std_auc = dfs.groupby(["Strategy", "Seed"]).mean().groupby("Strategy").std().round(2)['Accuracy']
     print("AUC", mean_auc, "+-", std_auc)
+
     # %% md
 
     #### Displaying some pictures to visualize training

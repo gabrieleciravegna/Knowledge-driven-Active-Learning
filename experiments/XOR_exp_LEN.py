@@ -1,3 +1,4 @@
+from sklearn.metrics import f1_score
 
 if __name__ == "__main__":
 
@@ -26,7 +27,7 @@ if __name__ == "__main__":
     from torch.utils.data import TensorDataset
 
     from kal.active_strategies import STRATEGIES, SAMPLING_STRATEGIES, ENTROPY_D, ENTROPY, ADV_DEEPFOOL, ADV_BIM, BALD, \
-    KALS, DROPOUTS, KAL_LEN_DROP_DU, KAL_LEN_DU, KAL_DU, KAL_DROP_DU
+        KALS, DROPOUTS, KAL_LEN_DROP_DU, KAL_LEN_DU, KAL_DU, KAL_DROP_DU
     from kal.knowledge.xor import XORLoss, steep_sigmoid
     from kal.metrics import F1
     from kal.network import MLP, train_loop, evaluate, predict_dropout, predict
@@ -35,7 +36,7 @@ if __name__ == "__main__":
     plt.rc('animation', html='jshtml')
     plt.close('all')
 
-    dataset_name = "xor_len"
+    dataset_name = "xor"
     model_folder = os.path.join("models", dataset_name)
     result_folder = os.path.join("results", dataset_name)
     image_folder = os.path.join("images", dataset_name)
@@ -56,11 +57,11 @@ if __name__ == "__main__":
     # strategies = STRATEGIES
     strategies = [KAL_LEN_DROP_DU]
 
-
     # %% md
     #### Generating and visualizing data for the xor problem
     # %%
 
+    KLoss = XORLoss
     load = False
     tot_points = 100000
     first_points = 10
@@ -112,8 +113,7 @@ if __name__ == "__main__":
     x1 = discrete_x[:, 0]
     x2 = discrete_x[:, 1]
     pred_rule = (x1 * (1 - x2)) + (x2 * (1 - x1))
-    print("Rule Accuracy:",
-          (pred_rule > 0.5).eq(y_t).sum().item() / y_t.shape[0] * 100)
+    print("Rule Accuracy:", f1_score(y_t, pred_rule > 0.5)* 100)
     # sns.scatterplot(x=x_t[:, 0].numpy(), y=x_t[:, 1].numpy(), hue=pred_rule)
     # plt.show()
 
@@ -131,7 +131,7 @@ if __name__ == "__main__":
         print("First idx", first_idx)
 
         for strategy in strategies:
-            active_strategy = SAMPLING_STRATEGIES[strategy](k_loss=XORLoss,
+            active_strategy = SAMPLING_STRATEGIES[strategy](k_loss=KLoss,
                                                             main_classes=[0],
                                                             rand_points=rand_points,
                                                             hidden_size=hidden_size,
@@ -140,14 +140,9 @@ if __name__ == "__main__":
                                                             mutual_excl=True, double_imp=True)
             df_file = os.path.join(result_folder, f"metrics_{n_points}_points_"
                                                   f"{seed}_seed_{strategy}_strategy.pkl")
-            if os.path.exists(df_file) and load:  # and "LEN" not in strategy:
+            if os.path.exists(df_file) and load:
                 df = pd.read_pickle(df_file)
-                df['Explanations'] = ["" for _ in range (len(df['Seed']))] \
-                    if "Explanations" not in df else df['Explanations']
                 dfs.append(df)
-                df_first_idx = df['Used Idx'][0][:first_points]
-                assert df_first_idx == first_idx, \
-                    f"Error in loading the data, loaded first points are differents\n{df_first_idx}"
                 auc = df['Accuracy'].mean()
                 print(f"Already trained {df_file}, auc: {auc}")
                 continue
@@ -175,9 +170,9 @@ if __name__ == "__main__":
                 n_classes = 1
                 x_train, y_train = x_t[train_idx], y_t[train_idx].unsqueeze(dim=1)
                 x_test, y_test = x_t[test_idx], y_t[test_idx].unsqueeze(dim=1)
-
             train_dataset = TensorDataset(x_train, y_train)
             test_dataset = TensorDataset(x_test, y_test)
+
             loss = torch.nn.BCEWithLogitsLoss(reduction="none")
             metric = F1()
 
@@ -246,8 +241,8 @@ if __name__ == "__main__":
             dfs.append(df)
 
     dfs = pd.concat(dfs)
-    dfs.to_pickle(f"{result_folder}\\metrics_{n_points}_points_{now}.pkl")
-    # dfs.to_pickle(f"{result_folder}\\results.pkl")
+    # dfs.to_pickle(f"{result_folder}\\metrics_{n_points}_points_{now}.pkl")
+    dfs.to_pickle(f"{result_folder}\\results.pkl")
 
     mean_auc = dfs.groupby("Strategy").mean().round(2)['Accuracy']
     std_auc = dfs.groupby(["Strategy", "Seed"]).mean().groupby("Strategy").std().round(2)['Accuracy']
@@ -275,5 +270,3 @@ if __name__ == "__main__":
                                                seed=seed)
                 else:
                     print(png_file + " Already extisting")
-
-

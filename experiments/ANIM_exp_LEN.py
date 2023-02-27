@@ -38,7 +38,7 @@ if __name__ == "__main__":
     from sklearn.model_selection import StratifiedKFold
 
     from kal.active_strategies import SAMPLING_STRATEGIES, ADV_DEEPFOOL, KALS, DROPOUTS, KAL_LEN_DU, KAL_LEN_DROP_DU
-    from kal.network import MLP, train_loop, evaluate, predict, predict_dropout, ELEN
+    from kal.network import MLP, train_loop, evaluate, predict, predict_dropout
     from kal.utils import set_seed
 
     from data.Animals import CLASS_1_HOTS, classes
@@ -51,7 +51,7 @@ if __name__ == "__main__":
     model_folder = os.path.join("models", dataset_name)
     result_folder = os.path.join("results", dataset_name)
     image_folder = os.path.join("images", dataset_name)
-    data_folder = os.path.join("..", "data", "Animals")
+    data_folder = os.path.join("..", "data", dataset_name)
     assert os.path.isdir(data_folder), "Data not available in the required folder"
 
     if not os.path.isdir(model_folder):
@@ -66,7 +66,6 @@ if __name__ == "__main__":
     now = str(datetime.datetime.now()).replace(":", ".")
     dev = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
     print(f"Working on {dev}")
-    KLoss = partial(AnimalLoss, names=classes)
 
     #%%
     first_points = 100
@@ -104,7 +103,8 @@ if __name__ == "__main__":
         transforms.Resize(256),
         transforms.CenterCrop(224),
         transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                             std=[0.229, 0.224, 0.225]),
     ])
     annoying_dir = os.path.join(data_folder, "__pycache__")
     if os.path.isdir(annoying_dir):
@@ -140,6 +140,7 @@ if __name__ == "__main__":
 
     #%%
     #### Visualizing and checking knowledge loss on the labels
+    KLoss = partial(AnimalLoss, names=classes)
 
     x_t = torch.as_tensor(x, dtype=torch.float).to(dev)
     y_t = torch.as_tensor(y_multi, dtype=torch.float).to(dev)
@@ -185,7 +186,6 @@ if __name__ == "__main__":
                 "Test Accuracy": [],
                 "Supervision Loss": [],
                 "Active Loss": [],
-                "Explanations": [],
                 "Time": [],
                 "Train Idx": [],
                 "Test Idx": []
@@ -222,9 +222,6 @@ if __name__ == "__main__":
 
                 test_accuracy, sup_loss = evaluate(net, test_dataset, metric=metric, loss=loss, device=dev)
 
-                formulas = []
-                KLoss = AnimalLoss
-
                 active_idx, active_loss = active_strategy.selection(preds_t, used_idx,
                                                                     n_points, labels=y_train,
                                                                     preds_dropout=preds_dropout,
@@ -243,7 +240,6 @@ if __name__ == "__main__":
                 df["Test Accuracy"].append(test_accuracy)
                 df["Supervision Loss"].append(sup_loss)
                 df["Active Loss"].append(active_loss.cpu().numpy())
-                df["Explanations"].append(formulas)
                 df["Time"].append((time.time() - t))
                 df["Train Idx"].append(train_idx)
                 df["Test Idx"].append(test_idx)
@@ -269,7 +265,6 @@ if __name__ == "__main__":
 
             df = pd.DataFrame(df)
             df.to_pickle(df_file)
-            # df.to_pickle(f"{df_file}_{now}")
             dfs.append(df)
 
     dfs = pd.concat(dfs)

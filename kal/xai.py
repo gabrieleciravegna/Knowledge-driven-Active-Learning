@@ -77,7 +77,7 @@ class XAI_TREE(XAI):
         expl_feats, expl_labels = x > 0.5, labels
         expl_model = DecisionTreeClassifier()
         expl_model = expl_model.fit(expl_feats[labelled_idx], expl_labels[labelled_idx])
-        expl_acc = expl_model.score(expl_feats, expl_labels)
+        expl_acc = expl_model.score(expl_feats[labelled_idx], expl_labels[labelled_idx])
         if expl_acc < 0.9:
             print(f"Low expl_accs: {expl_acc} Error in training the explainer")
         for i in range(n_classes):

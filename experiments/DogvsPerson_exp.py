@@ -39,8 +39,8 @@ if __name__ == "__main__":
     import kal.vision_utils.vis_utils as vis_utils
     import kal.vision_utils.my_utils as my_utils
 
-    from models.create_custom_model import create_custom_model_configuration_file
-    from models.download_yolo_weights import download_yolo_weights
+    from vision_utils.create_custom_model import create_custom_model_configuration_file
+    from vision_utils.download_yolo_weights import download_yolo_weights
     from kal.vision_utils.pytorchyolo.models import load_model
     from kal.vision_utils.pytorchyolo.test import print_eval_stats
     from kal.vision_utils.pytorchyolo.utils.parse_config import parse_data_config
@@ -474,144 +474,144 @@ if __name__ == "__main__":
         return l_train
 
 
-    # for seed in seeds:
-    #     df_file = os.path.join(result_folder, f"metrics_{KAL}_strategy_{seed}_seed_"
-    #                                           f"{first_points}_points.pkl")
-    #     model_file = os.path.join(model_folder, f"model_{KAL}_strategy_{seed}_seed_"
-    #                                             f"{first_points}_points.pt")
-    #
-    #     network = load_model(os.path.join(model_folder, model_cfg_file), weights)
-    #     if os.path.exists(model_file) and os.path.exists(df_file) and load:
-    #         print(f"Already trained {model_file} - {datetime.now()}")
-    #         continue
-    #     print(f"Training {model_file} - {datetime.now()}")
-    #     first_idx = np.random.randint(0, len(train_dataset), first_points)
-    #     train_loss = train_loop(network, train_dataset, first_idx,
-    #                             epochs, visualize_loss=True, verb=verbose)
-    #     torch.save(network.state_dict(), model_file)
-    #
-    #     test_acc = evaluate(network, test_dataset, verb=verbose)
-    #     train_stats = visualize_data_loss(network, train_dataset, first_idx)
-    #     train_acc, preds_t, sup_loss, cons_loss, arg_max = train_stats
-    #
-    #     d = {
-    #         "strategy": [KAL],
-    #         "seed": [seed],
-    #         "iteration": [0],
-    #         "active_idx": [first_idx],
-    #         "used_idx": [first_idx],
-    #         "predictions": [preds_t.cpu().numpy()],
-    #         "test accuracy": [test_acc],
-    #         "train accuracy": [test_acc],
-    #         "train_loss": [train_loss],
-    #         "constraint_loss": [cons_loss.cpu().numpy()],
-    #         "arg_max": [arg_max],
-    #         "supervision_loss": [sup_loss.cpu().numpy()]
-    #     }
-    #     pd.DataFrame(d).to_pickle(df_file)
-    #
-    # # %%
-    #
-    # network = load_model(os.path.join(model_folder, model_cfg_file), weights)
-    #
-    # dfs = []
-    # for strategy in strategies:
-    #     active_strategy = SAMPLING_STRATEGIES[strategy](k_loss=KLoss, main_classes=[0, 1])
-    #
-    #     for seed in seeds:
-    #         for it in range(0, n_iterations + 1):
-    #
-    #             used_points = first_points + it * n_points
-    #
-    #             df_file = os.path.join(result_folder, f"metrics_{strategy}_strategy_{seed}_seed_"
-    #                                                   f"{used_points}_points.pkl")
-    #             model_file = os.path.join(model_folder, f"model_{strategy}_strategy_{seed}_seed_"
-    #                                                     f"{used_points}_points.pt")
-    #             if it == 0:
-    #                 df_file = os.path.join(result_folder, f"metrics_{KAL}_strategy_{seed}_seed_"
-    #                                                       f"{used_points}_points.pkl")
-    #                 model_file = os.path.join(model_folder, f"model_{KAL}_strategy_{seed}_seed_"
-    #                                                         f"{used_points}_points.pt")
-    #
-    #             if os.path.exists(df_file) and os.path.exists(model_file) and (load or it == 0):
-    #                 print(f"Already trained {model_file} - {datetime.now()}")
-    #                 df = pd.read_pickle(df_file)
-    #                 if it == 0:
-    #                     df['strategy'] = strategy
-    #                 dfs.append(df)
-    #
-    #                 used_idx = torch.as_tensor(df['used_idx'][0])
-    #                 sup_loss = torch.as_tensor(df['supervision_loss'][0])
-    #                 preds_t = torch.as_tensor(df['predictions'][0])
-    #                 cons_loss, arg_max = KLoss()(preds_t, return_arg_max=True)
-    #                 # cons_loss = torch.as_tensor(dfs['constraint_loss'].iloc[-1])
-    #                 # arg_max = dfs['arg_max'].iloc[-1]
-    #                 available_idx = list({*range(tot_points)} - set(used_idx))
-    #
-    #                 # network.load_state_dict(torch.load(model_file, map_location=dev))
-    #                 network = load_model(os.path.join(model_folder, model_cfg_file), weights)
-    #
-    #                 accuracy = df['test accuracy'][0]
-    #                 print(f"mAP {accuracy}")
-    #
-    #                 continue
-    #             elif it == 0:
-    #                 raise RuntimeError("Error in loading first dataframe")
-    #
-    #             print(f"Training {model_file} - {datetime.now()}")
-    #
-    #             active_idx, active_loss = active_strategy.selection(preds_t, used_idx,
-    #                                                                 n_points,
-    #                                                                 dataset=train_dataset)
-    #
-    #             used_idx = np.append(used_idx, active_idx)
-    #
-    #             assert len(used_idx) == used_points, "Error in selecting points"
-    #
-    #             train_loss = train_loop(network, train_dataset, used_idx, epochs, verb=verbose)
-    #             torch.save(network.state_dict(), model_file)
-    #
-    #             test_accuracy = evaluate(network, test_dataset, verb=verbose)
-    #             train_accuracy, detection, sup_loss = evaluate(network, train_dataset,
-    #                                                            evaluate_loss=True, verb=verbose)
-    #
-    #             preds_t = convert_detection_to_prediction(detection, mini_batch_size)
-    #             cons_loss, arg_max = KLoss()(preds_t, return_arg_max=True)
-    #
-    #             d = {
-    #                 "strategy": [strategy],
-    #                 "seed": [seed],
-    #                 "iteration": [it],
-    #                 "active_idx": [active_idx.copy()],
-    #                 "used_idx": [used_idx.copy()],
-    #                 "predictions": [preds_t.cpu().numpy()],
-    #                 "train accuracy": [train_accuracy],
-    #                 "test accuracy": [test_accuracy],
-    #                 "train_loss": [train_loss],
-    #                 "constraint_loss": [cons_loss.numpy()],
-    #                 "arg_max": [arg_max],
-    #                 "supervision_loss": [sup_loss.numpy()],
-    #             }
-    #             print(f"\nTrain Acc: {train_accuracy:.3f}, Test Acc: {test_accuracy:.3f}, "
-    #                   f"S loss: {sup_loss.mean().item():.2f}, "
-    #                   f"n p: {len(used_idx)}")
-    #
-    #             df = pd.DataFrame(d)
-    #             df.to_pickle(df_file)
-    #             dfs.append(df)
-    #
-    #         if seed == 0:
-    #             losses = pd.concat(dfs)['train_loss'][pd.concat(dfs)['strategy'] == strategy]
-    #             losses = np.concatenate([*losses])
-    #             sns.lineplot(data=losses)
-    #             plt.yscale("log")
-    #             plt.ylabel("Loss")
-    #             plt.xlabel("Epochs")
-    #             plt.title(f"Training loss variations for {strategy} active learning strategy")
-    #             plt.show()
-    #
-    # dfs = pd.concat(dfs)
-    # dfs.to_pickle(os.path.join(result_folder, f"metrics.pkl"))
+    for seed in seeds:
+        df_file = os.path.join(result_folder, f"metrics_{KAL}_strategy_{seed}_seed_"
+                                              f"{first_points}_points.pkl")
+        model_file = os.path.join(model_folder, f"model_{KAL}_strategy_{seed}_seed_"
+                                                f"{first_points}_points.pt")
+
+        network = load_model(os.path.join(model_folder, model_cfg_file), weights)
+        if os.path.exists(model_file) and os.path.exists(df_file) and load:
+            print(f"Already trained {model_file} - {datetime.now()}")
+            continue
+        print(f"Training {model_file} - {datetime.now()}")
+        first_idx = np.random.randint(0, len(train_dataset), first_points)
+        train_loss = train_loop(network, train_dataset, first_idx,
+                                epochs, visualize_loss=True, verb=verbose)
+        torch.save(network.state_dict(), model_file)
+
+        test_acc = evaluate(network, test_dataset, verb=verbose)
+        train_stats = visualize_data_loss(network, train_dataset, first_idx)
+        train_acc, preds_t, sup_loss, cons_loss, arg_max = train_stats
+
+        d = {
+            "strategy": [KAL],
+            "seed": [seed],
+            "iteration": [0],
+            "active_idx": [first_idx],
+            "used_idx": [first_idx],
+            "predictions": [preds_t.cpu().numpy()],
+            "test accuracy": [test_acc],
+            "train accuracy": [test_acc],
+            "train_loss": [train_loss],
+            "constraint_loss": [cons_loss.cpu().numpy()],
+            "arg_max": [arg_max],
+            "supervision_loss": [sup_loss.cpu().numpy()]
+        }
+        pd.DataFrame(d).to_pickle(df_file)
+
+    # %%
+
+    network = load_model(os.path.join(model_folder, model_cfg_file), weights)
+
+    dfs = []
+    for strategy in strategies:
+        active_strategy = SAMPLING_STRATEGIES[strategy](k_loss=KLoss, main_classes=[0, 1])
+
+        for seed in seeds:
+            for it in range(0, n_iterations + 1):
+
+                used_points = first_points + it * n_points
+
+                df_file = os.path.join(result_folder, f"metrics_{strategy}_strategy_{seed}_seed_"
+                                                      f"{used_points}_points.pkl")
+                model_file = os.path.join(model_folder, f"model_{strategy}_strategy_{seed}_seed_"
+                                                        f"{used_points}_points.pt")
+                if it == 0:
+                    df_file = os.path.join(result_folder, f"metrics_{KAL}_strategy_{seed}_seed_"
+                                                          f"{used_points}_points.pkl")
+                    model_file = os.path.join(model_folder, f"model_{KAL}_strategy_{seed}_seed_"
+                                                            f"{used_points}_points.pt")
+
+                if os.path.exists(df_file) and os.path.exists(model_file) and (load or it == 0):
+                    print(f"Already trained {model_file} - {datetime.now()}")
+                    df = pd.read_pickle(df_file)
+                    if it == 0:
+                        df['strategy'] = strategy
+                    dfs.append(df)
+
+                    used_idx = torch.as_tensor(df['used_idx'][0])
+                    sup_loss = torch.as_tensor(df['supervision_loss'][0])
+                    preds_t = torch.as_tensor(df['predictions'][0])
+                    cons_loss, arg_max = KLoss()(preds_t, return_arg_max=True)
+                    # cons_loss = torch.as_tensor(dfs['constraint_loss'].iloc[-1])
+                    # arg_max = dfs['arg_max'].iloc[-1]
+                    available_idx = list({*range(tot_points)} - set(used_idx))
+
+                    # network.load_state_dict(torch.load(model_file, map_location=dev))
+                    network = load_model(os.path.join(model_folder, model_cfg_file), weights)
+
+                    accuracy = df['test accuracy'][0]
+                    print(f"mAP {accuracy}")
+
+                    continue
+                elif it == 0:
+                    raise RuntimeError("Error in loading first dataframe")
+
+                print(f"Training {model_file} - {datetime.now()}")
+
+                active_idx, active_loss = active_strategy.selection(preds_t, used_idx,
+                                                                    n_points,
+                                                                    dataset=train_dataset)
+
+                used_idx = np.append(used_idx, active_idx)
+
+                assert len(used_idx) == used_points, "Error in selecting points"
+
+                train_loss = train_loop(network, train_dataset, used_idx, epochs, verb=verbose)
+                torch.save(network.state_dict(), model_file)
+
+                test_accuracy = evaluate(network, test_dataset, verb=verbose)
+                train_accuracy, detection, sup_loss = evaluate(network, train_dataset,
+                                                               evaluate_loss=True, verb=verbose)
+
+                preds_t = convert_detection_to_prediction(detection, mini_batch_size)
+                cons_loss, arg_max = KLoss()(preds_t, return_arg_max=True)
+
+                d = {
+                    "strategy": [strategy],
+                    "seed": [seed],
+                    "iteration": [it],
+                    "active_idx": [active_idx.copy()],
+                    "used_idx": [used_idx.copy()],
+                    "predictions": [preds_t.cpu().numpy()],
+                    "train accuracy": [train_accuracy],
+                    "test accuracy": [test_accuracy],
+                    "train_loss": [train_loss],
+                    "constraint_loss": [cons_loss.numpy()],
+                    "arg_max": [arg_max],
+                    "supervision_loss": [sup_loss.numpy()],
+                }
+                print(f"\nTrain Acc: {train_accuracy:.3f}, Test Acc: {test_accuracy:.3f}, "
+                      f"S loss: {sup_loss.mean().item():.2f}, "
+                      f"n p: {len(used_idx)}")
+
+                df = pd.DataFrame(d)
+                df.to_pickle(df_file)
+                dfs.append(df)
+
+            if seed == 0:
+                losses = pd.concat(dfs)['train_loss'][pd.concat(dfs)['strategy'] == strategy]
+                losses = np.concatenate([*losses])
+                sns.lineplot(data=losses)
+                plt.yscale("log")
+                plt.ylabel("Loss")
+                plt.xlabel("Epochs")
+                plt.title(f"Training loss variations for {strategy} active learning strategy")
+                plt.show()
+
+    dfs = pd.concat(dfs)
+    dfs.to_pickle(os.path.join(result_folder, f"metrics.pkl"))
 
     # %%
 
