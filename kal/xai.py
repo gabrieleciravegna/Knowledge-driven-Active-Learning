@@ -73,24 +73,25 @@ class XAI_ELEN(XAI):
 
 class XAI_TREE(XAI):
 
-    def __init__(self, *args, class_names, height=None, **kwargs):
+    def __init__(self, *args, class_names, height=None, discretize_feats=False, **kwargs):
         self.class_names = class_names
         self.height = height
+        self.discretize_feats = discretize_feats
 
-    def explain(self, x, labels, labelled_idx, discretize_feats=False) -> List:
+    def explain(self, x, labels, labelled_idx) -> List:
         from kal.utils import tree_to_formula
         np.random.seed(0)
 
         formulas = []
         n_classes = labels.shape[1] if len(labels.shape) > 1 else 2
         expl_feats, expl_labels = x[labelled_idx].cpu(), labels[labelled_idx].cpu() > 0.5
-        if discretize_feats:
+        if self.discretize_feats:
             expl_feats = expl_feats > 0.5
         expl_model = DecisionTreeClassifier(max_depth=self.height)
         expl_model.fit(expl_feats, expl_labels)
         expl_acc = f1_score(expl_labels,
                             expl_model.predict(expl_feats), average="macro", zero_division=1)
-        if expl_acc < 0.9 and len(labelled_idx) > 10:
+        if expl_acc < 0.9 and len(labelled_idx) > 10 and not self.discretize_feats:
             print(f"Low expl_accs: {expl_acc} Error in training the explainer")
         for i in range(n_classes):
             formula = tree_to_formula(expl_model, self.class_names, target_class=i)
@@ -104,6 +105,8 @@ class XAI_TREE(XAI):
         expl_accs = []
         formulas = []
         expl_feats = labels[:, len(main_classes):].cpu().numpy()
+        if self.discretize_feats:
+            expl_feats = expl_feats > 0.5
         expl_label = labels[:, :len(main_classes)].argmax(dim=1).cpu().numpy()
         expl_names = self.class_names[len(main_classes):]
         expl_model = DecisionTreeClassifier(max_depth=self.height)
@@ -115,6 +118,8 @@ class XAI_TREE(XAI):
             formulas.append(formula)
 
         expl_feats = labels[:, :len(main_classes)].cpu().numpy()
+        if self.discretize_feats:
+            expl_feats = expl_feats > 0.5
         expl_label = labels[:, len(main_classes):].cpu().numpy() > 0.5
         expl_names = self.class_names[:len(main_classes)]
         for i in range(n_classes - len(main_classes)):
@@ -142,6 +147,8 @@ class XAI_TREE(XAI):
             non_i_classes = np.asarray([j for j in range(n_classes) if j != i])
             expl_label = train_labels[:, i] > 0.5
             expl_feats = train_labels[:, non_i_classes]
+            if self.discretize_feats:
+                expl_feats = expl_feats > 0.5
             expl_names = np.asarray(self.class_names)[non_i_classes]
             expl_model = DecisionTreeClassifier(max_depth=self.height)
             expl_model.fit(expl_feats, expl_label)

@@ -77,6 +77,7 @@ if __name__ == "__main__":
     lr = 1e-3
     epochs = 250
     main_classes = range(7)
+    discretize_feats = False
     metric = F1()
     load = False
     print("Rand points", rand_points)
@@ -165,6 +166,7 @@ if __name__ == "__main__":
                                                             rand_points=rand_points,
                                                             hidden_size=hidden_size,
                                                             dev=dev, cv=True,
+                                                            discretize_feats=discretize_feats,
                                                             class_names=class_names)
             df_file = os.path.join(result_folder, f"metrics_{n_points}_points_"
                                                   f"{seed}_seed_{strategy}_strategy.pkl")

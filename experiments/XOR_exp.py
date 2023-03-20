@@ -73,6 +73,7 @@ if __name__ == "__main__":
     seeds = 10
     lr = 1e-3
     epochs = 250
+    discretize_feats = True
     print(f"Number of random points: {rand_points}")
 
     x_t = torch.rand(tot_points, input_size).to(dev)
@@ -137,7 +138,8 @@ if __name__ == "__main__":
                                                             hidden_size=hidden_size,
                                                             dev=dev, cv=False,
                                                             class_names=["x0", "x1"],
-                                                            mutual_excl=True, double_imp=True)
+                                                            mutual_excl=True, double_imp=True,
+                                                            discretize_feats=discretize_feats)
             df_file = os.path.join(result_folder, f"metrics_{n_points}_points_"
                                                   f"{seed}_seed_{strategy}_strategy.pkl")
             if os.path.exists(df_file) and load:

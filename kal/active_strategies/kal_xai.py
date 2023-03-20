@@ -13,13 +13,13 @@ from kal.xai import XAI_TREE
 class KALXAISampling(Strategy):
     def __init__(self, rand_points=0, dev=torch.device("cpu"), cv=False, class_names=None,
                  xai_model=XAI_TREE, hidden_size=100, epochs=200, lr=0.001, height=None,
-                 main_classes=None, mutual_excl=False, double_imp=True, **kwargs):
+                 main_classes=None, mutual_excl=False, double_imp=True, discretize_feats=False, **kwargs):
         super(KALXAISampling, self).__init__()
         assert class_names is not None, "Need to pass the names of the classes/features " \
                                         "for which to extracts the explanations"
         self.dropout = False
         self.rand_points = rand_points
-        self.xai_model = xai_model(hidden_size, epochs, lr,
+        self.xai_model = xai_model(hidden_size, epochs, lr, discretize_feats=discretize_feats,
                                    height=height, class_names=class_names, dev=dev)
         self.cv = cv
         self.class_names = class_names

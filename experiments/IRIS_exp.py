@@ -92,6 +92,7 @@ if __name__ == "__main__":
     lr = 3 * 1e-3
     epochs = 200
     hidden_size = 100
+    discretize_feats = False
 
     # strategies = STRATEGIES
     strategies = [KAL_XAI_DU]
@@ -153,7 +154,8 @@ if __name__ == "__main__":
                                                             hidden_size=hidden_size,
                                                             dev=dev, cv=False,
                                                             class_names=feat_names,
-                                                            mutual_excl=True, double_imp=True)
+                                                            mutual_excl=True, double_imp=True,
+                                                            discretize_feats=discretize_feats)
             df_file = os.path.join(result_folder, f"metrics_{n_points}_points_"
                                                   f"{seed}_seed_{strategy}_strategy.pkl")
             if os.path.exists(df_file) and load:

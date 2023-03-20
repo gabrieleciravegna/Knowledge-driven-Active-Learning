@@ -82,6 +82,7 @@ if __name__ == "__main__":
     metric = F1()
     load = False
     mutual_excl = True
+    discretize_feats = True
 
     # strategies = KAL_XAIS
     strategies = [KAL_XAI_DU, KAL_XAI_DROP_DU]
@@ -167,7 +168,8 @@ if __name__ == "__main__":
                                                             rand_points=rand_points,
                                                             hidden_size=hidden_size,
                                                             dev=dev, cv=True,
-                                                            class_names=class_names)
+                                                            class_names=class_names,
+                                                            discretize_feats=discretize_feats)
             df_file = os.path.join(result_folder, f"metrics_{n_points}_points_"
                                                   f"{seed}_seed_{strategy}_strategy.pkl")
             if os.path.exists(df_file) and load:
