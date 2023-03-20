@@ -236,9 +236,9 @@ def predict_dropout_splits(network, data: TensorDataset, batch_size=None,
 
 
 def evaluate(network: MLP, data: Union[TensorDataset, Subset],
-             batch_size=None, loss=torch.nn.BCELoss(reduction="none"),
+             batch_size=None, loss=torch.nn.BCEWithLogitsLoss(reduction="none"),
              metric: Metric = None, device=torch.device("cpu"),
-             return_preds=False) \
+             return_preds=False, labelled_idx=None) \
         -> Union[Tuple[float, Tensor, Tensor], Tuple[float, Tensor]]:
 
     if metric is None:
@@ -254,7 +254,10 @@ def evaluate(network: MLP, data: Union[TensorDataset, Subset],
 
     preds, l_test = predict(network, data, batch_size, loss, device)
 
-    accuracy = metric(preds, labels)
+    if labelled_idx:
+        accuracy = metric(preds[labelled_idx], labels[labelled_idx])
+    else:
+        accuracy = metric(preds, labels)
 
     if return_preds:
         return accuracy, l_test, preds

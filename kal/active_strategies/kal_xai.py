@@ -12,14 +12,15 @@ from kal.xai import XAI_TREE
 
 class KALXAISampling(Strategy):
     def __init__(self, rand_points=0, dev=torch.device("cpu"), cv=False, class_names=None,
-                 xai_model=XAI_TREE, hidden_size=100, epochs=200, lr=0.001, main_classes=None,
-                 mutual_excl=False, double_imp=True, **kwargs):
+                 xai_model=XAI_TREE, hidden_size=100, epochs=200, lr=0.001, height=None,
+                 main_classes=None, mutual_excl=False, double_imp=True, **kwargs):
         super(KALXAISampling, self).__init__()
         assert class_names is not None, "Need to pass the names of the classes/features " \
-                                        "for which to extract the explanations"
+                                        "for which to extracts the explanations"
         self.dropout = False
         self.rand_points = rand_points
-        self.xai_model = xai_model(hidden_size, lr, epochs, class_names=class_names, dev=dev)
+        self.xai_model = xai_model(hidden_size, epochs, lr,
+                                   height=height, class_names=class_names, dev=dev)
         self.cv = cv
         self.class_names = class_names
         self.main_classes = main_classes
@@ -30,12 +31,28 @@ class KALXAISampling(Strategy):
              x=None, preds_dropout=None, return_argmax=False, **kwargs) \
             -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
         if self.cv:
-            k_loss = Expl_2_Loss_CV(self.class_names, formulas, uncertainty, self.main_classes,
-                                    mutual_excl=self.mutual_excl, double_imp=self.double_imp)
-            c_loss, arg_max = k_loss(preds, x=x, return_argmax=True)
+            if len(self.main_classes) == len(self.class_names):
+                c_loss, arg_max = [], []
+                for i in self.main_classes:
+                    attribute_classes = [j for j in self.main_classes if j != i]
+                    main_classes = [i]
+                    k_loss = Expl_2_Loss_CV(self.class_names, formulas, uncertainty,
+                                            main_classes, attribute_classes,
+                                            mutual_excl=self.mutual_excl, double_imp=self.double_imp)
+                    c_loss += [k_loss(preds, x=x)]
+                c_loss = torch.stack(c_loss, dim=1)
+                arg_max = c_loss.argmax(dim=1)
+                c_loss = c_loss.sum(dim=1)
+            else:
+                attribute_classes = [*range(len(self.main_classes), len(self.class_names))]
+                k_loss = Expl_2_Loss_CV(self.class_names, formulas, uncertainty,
+                                        self.main_classes, attribute_classes,
+                                        mutual_excl=self.mutual_excl, double_imp=self.double_imp)
+                c_loss, arg_max = k_loss(preds, x=x, return_argmax=True)
         else:
             k_loss = Expl_2_Loss(self.class_names, formulas, uncertainty=uncertainty,
                                  mutual_excl=self.mutual_excl, double_imp=self.double_imp)
+            x = x.to(preds.device)
             c_loss, arg_max = k_loss(preds, x=x, return_argmax=True)
 
         if return_argmax:
@@ -53,7 +70,10 @@ class KALXAISampling(Strategy):
                "Both c_loss and arg max has to be passed to the KAL selection, or none of them"
 
         if self.cv:
-            formulas = self.xai_model.explain_cv(n_classes, labels, labelled_idx, self.main_classes)
+            if len(self.main_classes) == n_classes:
+                formulas = self.xai_model.explain_cv_multi_class(n_classes, preds, labelled_idx)
+            else:
+                formulas = self.xai_model.explain_cv(n_classes, preds, labelled_idx, self.main_classes)
         else:
             formulas = self.xai_model.explain(x, labels, labelled_idx)
 
@@ -66,8 +86,11 @@ class KALXAISampling(Strategy):
                                                      preds_dropout=preds_dropout)
 
         if self.rand_points > 0:
-            rand_idx, rand_loss = RandomSampling().selection(preds, labelled_idx, self.rand_points)
-            selected_idx = selected_idx[:-self.rand_points] + rand_idx
+            selected_idx = selected_idx[:-self.rand_points]
+            rand_idx, rand_loss = RandomSampling().selection(preds, labelled_idx + selected_idx, self.rand_points)
+            selected_idx += rand_idx
+
+            assert len(np.unique(selected_idx)) == n_p, f"Error in selecting the points: {selected_idx}"
 
         return selected_idx, c_loss
 
@@ -125,3 +148,4 @@ class KALXAIDropDiversityUncSampling(KALXAIDropSampling):
         if "diversity" in kwargs:
             kwargs.pop("diversity")
         return super().selection(*args, diversity=True, **kwargs)
+

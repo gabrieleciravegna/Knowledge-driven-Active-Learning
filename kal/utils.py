@@ -12,12 +12,13 @@ import random
 # from kal.network import MLP
 from sklearn.tree import _tree, DecisionTreeClassifier
 
-from kal.active_strategies import NAME_MAPPINGS
+epsilon = 1e-10
 
 
 def visualize_data_predictions(x_t: torch.Tensor, itr: int, act_strategy: str,
                                dataframe: pd.DataFrame, png_file: str = None,
                                dimensions=None, seed=0, dataset="xor"):
+    from kal.active_strategies import NAME_MAPPINGS
     if dimensions is None:
         dimensions = [0, 1]
     dataframe = dataframe[dataframe["Seed"] == seed]
@@ -26,9 +27,11 @@ def visualize_data_predictions(x_t: torch.Tensor, itr: int, act_strategy: str,
 
     a_idx = df_iteration["Active Idx"].item()
     u_idx = df_iteration["Used Idx"].item()
-    acc = df_iteration["Accuracy"].item()
-    train_idx = df_iteration["Train Idx"].item()
     n_points = len(u_idx)
+    assert n_points == len(np.unique(u_idx)), f"Error in selecting points {u_idx}"
+
+    train_idx = df_iteration["Train Idx"].item()
+    acc = df_iteration['Test Accuracy'].item()
 
     x_0, x_1 = x_t.cpu().numpy()[train_idx, dimensions[0]], \
                x_t.cpu().numpy()[train_idx, dimensions[1]]
@@ -46,17 +49,23 @@ def visualize_data_predictions(x_t: torch.Tensor, itr: int, act_strategy: str,
         plt.ylabel("$x_2$")
     else:
         preds = np.argmax(preds, axis=1)
-        new_idx = [2 if idx in a_idx else 1 if idx in u_idx else 0
-                   for idx in range(preds.shape[0])]
-        sns.scatterplot(x=x_0, y=x_1, hue=preds, style=new_idx, markers=['o', 'X', 'D', ])
+        new_idx = [1 if idx in a_idx else 0 for idx in u_idx]
+        sns.set_palette(sns.color_palette()[:3])
+        sns.scatterplot(x=x_0, y=x_1, hue=preds, legend=True)
+        sns.scatterplot(x=x_0[np.asarray(u_idx)], y=x_1[np.asarray(u_idx)], legend=False,
+                        hue=preds[u_idx], size=new_idx, sizes=[150, 200], style=new_idx)
+        # new_idx = [2 if idx in a_idx else 1 if idx in u_idx else 0
+        #            for idx in range(preds.shape[0])]
+        # sns.scatterplot(x=x_0, y=x_1, hue=preds,
+        #                 style=new_idx, markers=['o', 'X', 'D', ])
         plt.xlabel("$Petal Length$")
-        plt.ylabel("$petal Width$")
+        plt.ylabel("$Petal Width$")
 
     plt.axhline(0.5, 0, 1, c="k")
     plt.axvline(0.5, 0, 1, c="k")
     # plt.title(f"Points selected by {act_strategy}, iter {itr}, "
     #           f"acc {acc:.2f}, n_points{n_points}")
-    plt.title(f"{NAME_MAPPINGS[act_strategy]}", fontsize=36)
+    plt.title(f"{NAME_MAPPINGS[act_strategy]} - {n_points} p - {acc:.2f} %", fontsize=28)
     plt.xticks([0.0, 0.5, 1.0])
     plt.yticks([0.0, 0.5, 1.0])
     sns.despine(left=True, bottom=True)
@@ -182,7 +191,7 @@ def replace_expl_names(explanation: str, concept_names: List[str]) -> str:
         f_name = re.sub('[^a-zA-Z0-9_&|~ \n\.]', '', f_name)
         mapping.append((f_name, f_abbr))
 
-    explanation = re.sub('[^a-zA-Z0-9_&|~ \n\.]', '', explanation)
+    explanation = re.sub('[^a-zA-Z0-9_&<>=|~ \n\.]', '', explanation)
     for k, v in mapping:
         # explanation = explanation.replace(k, v)
         explanation = re.sub(r"\b%s\b" % k, v, explanation)
@@ -221,15 +230,15 @@ def tree_to_formula(tree: DecisionTreeClassifier, concept_names: List[str], targ
         if tree_.feature[node] != _tree.TREE_UNDEFINED:
             name = feature_name[node]
             threshold = tree_.threshold[node]
-            assert threshold == 0.5, f"Error in threshold {threshold}"
-            s = f'~{name}'
+            # assert threshold == 0.5, f"Error in threshold {threshold}"
+            s = f'{name} <= {threshold}'
             if node == 0:
                 pathto[node] = s
             else:
                 pathto[node] = pathto[parent] + ' & ' + s
             recurse(tree_.children_left[node], depth + 1, node)
 
-            s = f'{name}'
+            s = f'{name} > {threshold}'
             if node == 0:
                 pathto[node] = s
             else:
@@ -237,8 +246,16 @@ def tree_to_formula(tree: DecisionTreeClassifier, concept_names: List[str], targ
             recurse(tree_.children_right[node], depth + 1, node)
         else:
             k = k + 1
-            if tree_.value[node].squeeze().argmax() == target_class:
-                explanation += f'({pathto[parent]}) | '
+            try:
+                if len(tree_.value[node].squeeze().shape) == 1:
+                    node_class = tree_.value[node].squeeze().argmax()
+                else:
+                    node_class = tree_.value[node][:,1].argmax()
+                if node_class == target_class:
+                    explanation += f'({pathto[parent]}) | '
+            except:
+                print("error in extracting formula")
+                pass
 
     recurse(0, 1, 0)
     explanation = explanation[:-3]
@@ -255,3 +272,19 @@ def tree_to_formula(tree: DecisionTreeClassifier, concept_names: List[str], targ
                 new_expl = new_expl[:-3] + ") | "
         explanation = new_expl[:-3]
     return explanation
+
+
+def inv_steep_sigmoid(x: torch.Tensor, k=100, b=0.5) -> torch.Tensor:
+    output: torch.Tensor = 1 / (1 + torch.exp(k * (x - b)))
+    return output
+
+
+def steep_sigmoid(x: torch.Tensor, k=100, b=0.5) -> torch.Tensor:
+    output: torch.Tensor = 1 / (1 + torch.exp(-k * (x - b)))
+    return output
+
+
+def double_implication_loss(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+    impl_1 = a * (1 - b)
+    impl_2 = b * (1 - a)
+    return impl_1 + impl_2

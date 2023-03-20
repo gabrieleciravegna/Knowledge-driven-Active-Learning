@@ -6,6 +6,7 @@ import torch
 from sympy import to_dnf
 
 from kal.knowledge import KnowledgeLoss
+from kal.utils import steep_sigmoid, inv_steep_sigmoid, epsilon
 
 
 class Expl_2_Loss(KnowledgeLoss):
@@ -31,60 +32,71 @@ class Expl_2_Loss(KnowledgeLoss):
             assert len(self.expl) == 1
 
         # Calculating the loss associated to the explanation of each class
-        loss_fol_product_tnorm = []
+        loss_fol_product_tnorm = [torch.zeros(output.shape[0], device=output.device)]
         for i, expl_i in enumerate(self.expl):
-            if expl_i == "":
-                continue
 
             f = output[:, i]
 
             assert len(self.names) == x.shape[1], "names must passed to compute " \
                                                   "the loss from the explanation"
 
-            expl_i = replace_expl_names(expl_i, self.names)
-            expl_i = str(to_dnf(expl_i, force=True))
-            expl_i = expl_i.replace("(", "").replace(")", "").replace(" ", "")
+            if expl_i != "":
+                or_term = 0.  # False is the neutral term for the OR
 
-            or_term = 0.  # False is the neutral term for the OR
-            # if len(expl_i.split("|")) != 1:
-            #     print(f"Warning: having {len(expl_i.split('|'))} or in the extracted rule")
+                expl_i = replace_expl_names(expl_i, self.names)
+                if "<=" in expl_i or ">" in expl_i:
+                    diseq = True
+                else:
+                    diseq = False
+                    expl_i = str(to_dnf(expl_i, force=True))
+                expl_i = expl_i.replace("(", "").replace(")", "").replace(" ", "")
 
-            for min_term in expl_i.split("|"):
-                # Calculating the loss associated to each minterm
-                term_loss = 1.  # True is the neutral term for the AND
-                for term in min_term.split("&"):
-                    neg = False
-                    if "~" in term:
-                        term = term.replace("~", "")
-                        neg = True
-                    feat_n = int(term.replace("feature", ""))
-                    feat = x[:, feat_n]
-                    if neg:
-                        term_loss *= (1 - feat)
-                    else:
-                        term_loss *= feat
-                # The loss associated to the disjunction is the disjunction
-                # of the losses associated to each minterm a | b | c = (a | b) | c
-                or_term = or_term + term_loss - or_term * term_loss
+                for min_term in expl_i.split("|"):
+                    # Calculating the loss associated to each minterm
+                    term_loss = 1.  # True is the neutral term for the AND
+                    for term in min_term.split("&"):
+                        neg = False
+                        if "~" in term:
+                            term = term.replace("~", "")
+                            neg = True
+                        feat_n = int(term[term.index("feature")+7:term.index("feature")+17])
+                        feat = x[:, feat_n]
+                        if diseq:
+                            if "<=" in term:
+                                thr = float(term.split("<=")[1])
+                                term_loss *= inv_steep_sigmoid(feat, b=thr)
+                            else:
+                                thr = float(term.split(">")[1])
+                                term_loss *= steep_sigmoid(feat, b=thr)
+                        else:
+                            if neg:
+                                term_loss *= inv_steep_sigmoid(feat)
+                            else:
+                                term_loss *= steep_sigmoid(feat)
+                    # The loss associated to the disjunction is the disjunction
+                    # of the losses associated to each minterm a | b | c = (a | b) | c
+                    or_term = or_term + term_loss - or_term * term_loss
 
-            # Computing f -> or_term = !f | or_term
-            # impl_loss_1 = 1 - ((1 - f) + or_term - (1 - f) * or_term)
-            # impl_loss_1 = 1 - (1 - f - f*or_term)
-            # impl_loss_1 = 1 - (1 - f* (1 - or_term))
-            impl_loss_1 = f * (1 - or_term)
-            assert not targets or impl_loss_1.sum() == 0, "Error in calculating implications Class <-> Attr"
-            loss_fol_product_tnorm.append(impl_loss_1)
+                # Computing f -> or_term = !f | or_term
+                # impl_loss_1 = 1 - ((1 - f) + or_term - (1 - f) * or_term)
+                # impl_loss_1 = 1 - (1 - f - f*or_term)
+                # impl_loss_1 = 1 - (1 - f* (1 - or_term))
+                impl_loss_1 = f * (1 - or_term)
+                assert not targets or impl_loss_1.sum() == 0, "Error in calculating implications Class <-> Attr"
+                loss_fol_product_tnorm.append(impl_loss_1)
 
-            # Computing or_term -> f  = !or_term | f
-            # impl_loss_1 = 1 - ((1 - or_term) + f - (1 - or_term) * f)
-            # impl_loss_1 = 1 - (1 - or_term + or_term*f)
-            # impl_loss_1 = 1 - (1 - or_term * (1 - f))
-            if self.double_imp:
-                impl_loss_2 = or_term * (1 - f)
-                assert not targets or impl_loss_2.sum() == 0, "Error in calculating implications Attr -> Class"
-                loss_fol_product_tnorm.append(impl_loss_2)
+                # Computing or_term -> f  = !or_term | f
+                # impl_loss_1 = 1 - ((1 - or_term) + f - (1 - or_term) * f)
+                # impl_loss_1 = 1 - (1 - or_term + or_term*f)
+                # impl_loss_1 = 1 - (1 - or_term * (1 - f))
+                if self.double_imp:
+                    impl_loss_2 = or_term * (1 - f)
+                    assert not targets or impl_loss_2.sum() == 0, "Error in calculating implications Attr -> Class"
+                    loss_fol_product_tnorm.append(impl_loss_2)
 
         if self.mutual_excl:
+            # mutual_excl -> !((f1 & !f2 & ...) | (!f1 & f2 & ...) | ... )
+            # mutual_excl -> (!(f1 & !f2 & ...) & !(!f1 & f2 & ...) & ... )
             mutual_excl_loss = torch.ones(output.shape[0], device=output.device)
             for k in range(output.shape[1]):
                 excl_loss = deepcopy(output[:, k])
@@ -109,7 +121,7 @@ class Expl_2_Loss(KnowledgeLoss):
         loss_sum = torch.squeeze(torch.sum(losses, dim=1))
 
         threshold = 0.5 if targets else 10.
-        # self.check_loss(output, losses.T, loss_sum, threshold)
+        self.check_loss(output, losses.T, loss_sum, threshold)
 
         if return_losses:
             if return_argmax:
@@ -127,10 +139,10 @@ class Expl_2_Loss(KnowledgeLoss):
 class Expl_2_Loss_CV(Expl_2_Loss):
 
     def __init__(self, names: List[str], expl: List[str], uncertainty: bool, main_classes: Sized,
-                 unc_all=True, mutual_excl=False, double_imp=True, percentage=None):
+                 attribute_classes: Sized, unc_all=True, mutual_excl=False, double_imp=True, percentage=None):
         self.n_classes = len(names)
         self.main_classes = main_classes
-        self.attribute_classes = range(len(self.main_classes), self.n_classes)
+        self.attribute_classes = attribute_classes
         super().__init__(names, expl, uncertainty=uncertainty, mutual_excl=mutual_excl,
                          double_imp=double_imp, percentage=percentage)
         self.unc_all = unc_all
@@ -197,22 +209,84 @@ class Expl_2_Loss_CV(Expl_2_Loss):
         return loss_sum
 
 
-# if __name__ == "__main__":
-#     output = torch.tensor([
-#         [0., 1., 0., 0.],
-#         [0.1, 0.6, 0.4, 0.0],
-#         [0., 0., 0., 0.1],
-#         [1.0, 0.9, 0.0, 0.0],
-#         [1.0, 1.0, 0.1, 0.2],
-#         [1.0, 1.0, 0., 0.]
-#     ])
-#
-#     mutual_excl_loss = torch.ones(output.shape[0])
-#     for it in range(output.shape[1]):
-#         excl_loss = deepcopy(output[:, it])
-#         for j in range(output.shape[1]):
-#             if it != j:
-#                 excl_loss *= (1 - output[:, j])
-#         mutual_excl_loss *= 1 - excl_loss
-#
-#     print(mutual_excl_loss)
+if __name__ == "__main__":
+    x = torch.tensor([
+        [0.0, 0.0],
+        [0.0, 1.0],
+        [1.0, 0.0],
+        [1.0, 1.0],
+    ])
+
+    # OR FORMULA
+    formula = ["x1 | x2"]
+    output = torch.tensor([
+        0.0,
+        1.0,
+        1.0,
+        1.0,
+    ])
+    loss = Expl_2_Loss(names=["x1", "x2"], expl=formula)
+    l = loss(output, x).sum()
+    assert np.abs(l - 0) < epsilon, f"Error in computing loss {l:.2f}"
+
+    # WRONG OR FORMULA
+    output = torch.tensor([
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+    ])
+    l = loss(output, x).sum()
+    assert np.abs(l - 2) < epsilon, f"Error in computing loss {l:.2f}"
+
+    # AND FORMULA
+    formula = ["x1 & x2"]
+    output = torch.tensor([
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+    ])
+    loss = Expl_2_Loss(names=["x1", "x2"], expl=formula)
+    l = loss(output, x).sum()
+    assert np.abs(l - 0) < epsilon, f"Error in computing loss {l:.2f}"
+
+    # AND FORMULA WITH NOT
+    formula = ["x1 & ~x2"]
+    output = torch.tensor([
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+    ])
+    loss = Expl_2_Loss(names=["x1", "x2"], expl=formula)
+    l = loss(output, x).sum()
+    assert np.abs(l - 0) < epsilon, f"Error in computing loss {l:.2f}"
+
+    output = torch.tensor([
+        0.0,
+        0.5,
+        1.0,
+        1.0,
+    ])
+    loss = Expl_2_Loss(names=["x1", "x2"], expl=[""], mutual_excl=True)
+    l = loss(output, x).sum()
+    assert np.abs(l - 0.5625) < epsilon, f"Error in computing loss {l:.5f}"
+
+    # AND FORMULA WITH DISEQ
+    formula = ["x1 > 0.6 & x2 > 0.3"]
+    x = torch.tensor([
+        [0.8, 0.5],
+        [0.0, 1.0],
+        [1.0, 0.0],
+        [0.9, 0.7],
+    ])
+    output = torch.tensor([
+        1.0,
+        0.0,
+        0.0,
+        1.0,
+    ])
+    loss = Expl_2_Loss(names=["x1", "x2"], expl=formula)
+    l = loss(output, x).sum()
+    assert np.abs(l - 0) < epsilon, f"Error in computing loss {l:.2f}"

@@ -3,22 +3,7 @@ from typing import Tuple, Union
 import torch
 
 from . import KnowledgeLoss
-
-
-def inv_steep_sigmoid(x: torch.Tensor, k=100, b=0.5) -> torch.Tensor:
-    output: torch.Tensor = 1 / (1 + torch.exp(k * (x - b)))
-    return output
-
-
-def steep_sigmoid(x: torch.Tensor, k=100, b=0.5) -> torch.Tensor:
-    output: torch.Tensor = 1 / (1 + torch.exp(-k * (x - b)))
-    return output
-
-
-def double_implication_loss(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
-    impl_1 = a * (1 - b)
-    impl_2 = b * (1 - a)
-    return impl_1 + impl_2
+from ..utils import double_implication_loss, steep_sigmoid, inv_steep_sigmoid
 
 
 class InsuranceLoss(KnowledgeLoss):

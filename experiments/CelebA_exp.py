@@ -1,3 +1,5 @@
+from kal.xai import XAI_ELEN, XAI_TREE
+
 if __name__ == "__main__":
 
     #%% md
@@ -15,6 +17,7 @@ if __name__ == "__main__":
 
     import os
     os.environ["CUDA_VISIBLE_DEVICES"] = ""
+    os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
     os.environ["PYTHONPYCACHEPREFIX"] = os.path.join("..", "pycache")
 
     import tqdm
@@ -36,7 +39,7 @@ if __name__ == "__main__":
     from tqdm import trange
     from sklearn.model_selection import StratifiedKFold
 
-    from kal.active_strategies import SAMPLING_STRATEGIES, ADV_DEEPFOOL, KALS, DROPOUTS, KAL_LEN_DU, KAL_LEN_DROP_DU
+    from kal.active_strategies import SAMPLING_STRATEGIES, ADV_DEEPFOOL, KALS, DROPOUTS, KAL_XAI_DU, KAL_XAI_DROP_DU
     from kal.network import MLP, train_loop, evaluate, predict, predict_dropout
     from kal.utils import set_seed
 
@@ -79,7 +82,7 @@ if __name__ == "__main__":
     KLoss = None
 
     # strategies = STRATEGIES
-    strategies = [KAL_LEN_DU, KAL_LEN_DROP_DU]
+    strategies = [KAL_XAI_DU, KAL_XAI_DROP_DU]
 
     print("Strategies:", strategies)
     print("n_points", n_points, "n_iterations", n_iterations)
@@ -107,7 +110,7 @@ if __name__ == "__main__":
     tot_points = len(dataset)
     class_names = dataset.attr_names[:-1]
     n_classes = len(class_names)
-    main_classes = range(n_classes)
+    main_classes = [*range(n_classes)]
     feature_file = os.path.join(data_folder, "ResNet50-TL-feats.pth")
     target_file = os.path.join(data_folder, "targets.pth")
 
@@ -132,6 +135,7 @@ if __name__ == "__main__":
     x_t = torch.as_tensor(x, dtype=torch.float).to(dev)
     y_t = torch.as_tensor(y, dtype=torch.float).to(dev)
 
+
     #%%
     #### Active Learning Strategy Comparison
     dfs = []
@@ -143,13 +147,23 @@ if __name__ == "__main__":
         first_idx = np.random.choice(train_sample, first_points, replace=False).tolist()
         print("First idx", first_idx)
 
+        # Creating dataset for training and testing
+        x_train, y_train = x_t[train_idx], y_t[train_idx]
+        x_test, y_test = x_t[test_idx], y_t[test_idx]
+        train_dataset = TensorDataset(x_train, y_train)
+        test_dataset = TensorDataset(x_test, y_test)
+
+        loss = torch.nn.BCEWithLogitsLoss(reduction="none")
+        metric = F1()
+
         for strategy in strategies:
             active_strategy = SAMPLING_STRATEGIES[strategy](k_loss=KLoss,
                                                             main_classes=main_classes,
                                                             rand_points=rand_points,
                                                             hidden_size=hidden_size,
                                                             dev=dev, cv=True,
-                                                            class_names=class_names)
+                                                            class_names=class_names,
+                                                            height=3)
             df_file = os.path.join(result_folder, f"metrics_{n_points}_points_"
                                                   f"{seed}_seed_{strategy}_strategy.pkl")
             if os.path.exists(df_file) and load:
@@ -174,15 +188,6 @@ if __name__ == "__main__":
                 "Train Idx": [],
                 "Test Idx": []
             }
-
-            # Creating dataset for training and testing
-            x_train, y_train = x_t[train_idx], y_t[train_idx]
-            x_test, y_test = x_t[test_idx], y_t[test_idx]
-            train_dataset = TensorDataset(x_train, y_train)
-            test_dataset = TensorDataset(x_test, y_test)
-
-            loss = torch.nn.BCEWithLogitsLoss(reduction="none")
-            metric = F1()
 
             set_seed(0)
             net = MLP(n_classes, input_size, hidden_size, dropout=True).to(dev)

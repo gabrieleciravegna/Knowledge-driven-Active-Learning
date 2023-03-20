@@ -37,7 +37,7 @@ if __name__ == "__main__":
     from tqdm import trange
     from sklearn.model_selection import StratifiedKFold
 
-    from kal.active_strategies import SAMPLING_STRATEGIES, ADV_DEEPFOOL, KALS, DROPOUTS, KAL_LEN_DU, KAL_LEN_DROP_DU
+    from kal.active_strategies import SAMPLING_STRATEGIES, ADV_DEEPFOOL, KALS, DROPOUTS, KAL_XAI_DU, KAL_XAI_DROP_DU
     from kal.network import MLP, train_loop, evaluate, predict, predict_dropout
     from kal.utils import set_seed
 
@@ -78,11 +78,11 @@ if __name__ == "__main__":
     epochs = 250
     main_classes = range(7)
     metric = F1()
-    load = True
+    load = False
     print("Rand points", rand_points)
 
     # strategies = [BALD]
-    strategies = [KAL_LEN_DU, KAL_LEN_DROP_DU]
+    strategies = [KAL_XAI_DU]
     # # strategies.pop(strategies.index(KMEANS))
     # # strategies.pop(strategies.index(KCENTER))
     # strategies.pop(strategies.index(ADV_DEEPFOOL))
@@ -211,8 +211,8 @@ if __name__ == "__main__":
 
                 losses += train_loop(net, train_dataset, used_idx, epochs,
                                      lr=lr, loss=loss, device=dev)
-                train_accuracy, _, preds_t = evaluate(net, train_dataset, loss=loss,
-                                                      device=dev, return_preds=True)
+                train_accuracy, _, preds_t = evaluate(net, train_dataset, loss=loss, device=dev,
+                                                      labelled_idx=used_idx, return_preds=True)
                 if strategy in DROPOUTS:
                     preds_dropout = predict_dropout(net, train_dataset, device=dev)
                     assert (preds_dropout - preds_t).abs().sum() > .0, \
@@ -247,12 +247,10 @@ if __name__ == "__main__":
                 assert isinstance(used_idx, list), "Error"
 
                 pbar.set_description(f"{strategy} {seed + 1}/{seeds}, "
-                                     # f"expl: {formulas}, "
-                                     f"train acc: {np.mean(df['Train Accuracy']):.2f}, "
-                                     f"test acc: {np.mean(df['Test Accuracy']):.2f}, "
-                                     f"s_l: {mean(sup_loss):.2f}, "
+                                     f"train auc: {np.mean(df['Train Accuracy']):.2f}, "
+                                     f"test auc: {np.mean(df['Test Accuracy']):.2f}, "
+                                     # f"s_l: {mean(sup_loss):.2f}, "
                                      f"l: {losses[-1]:.2f}, p: {len(used_idx)}")
-                print("")
 
             if seed == 0:
                 sns.lineplot(data=losses)
@@ -273,7 +271,7 @@ if __name__ == "__main__":
 
     mean_auc = dfs.groupby("Strategy").mean().round(2)['Test Accuracy']
     std_auc = dfs.groupby(["Strategy", "Seed"]).mean().groupby("Strategy").std().round(2)['Test Accuracy']
-    print("AUC", mean_auc.item(), "+-", std_auc.item())
+    print("AUC", mean_auc, "+-", std_auc)
     # %% md
 
     #### Displaying some pictures to visualize training

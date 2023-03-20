@@ -2,23 +2,23 @@ from typing import Dict, Callable
 
 import seaborn as sns
 
-from .adv_bim import AdversarialBIMSampling
-from .adv_deepfool import AdversarialDeepFoolSampling
-from .entropy import EntropySampling, EntropyDropoutSampling
-from .kal_xai import KALXAIDiversityUncSampling, KALXAIDropDiversityUncSampling
-from .kal_plus import KALPlusSampling, KALPlusSamplingSVM, KALPlusSamplingTree, KALPlusSamplingLOF, \
+from kal.active_strategies.adv_bim import AdversarialBIMSampling
+from kal.active_strategies.adv_deepfool import AdversarialDeepFoolSampling
+from kal.active_strategies.entropy import EntropySampling, EntropyDropoutSampling
+from kal.active_strategies.kal_xai import KALXAIDiversityUncSampling, KALXAIDropDiversityUncSampling
+from kal.active_strategies.kal_plus import KALPlusSampling, KALPlusSamplingSVM, KALPlusSamplingTree, KALPlusSamplingLOF, \
     KALPlusUncDiversitySampling, KALPlusDiversitySampling, KALPlusUncSampling, KALPlusDropSampling, \
     KALPlusDropUncSampling, KALPlusDropDiversitySampling, KALPlusDropDiversityUncSampling
-from .random import RandomSampling
-from .strategy import Strategy
-from .supervised import SupervisedSampling
-from .kal import KALSampling, KALDiversitySampling, KALUncSampling, KALDiversityUncSampling, KALDropSampling, \
+from kal.active_strategies.random import RandomSampling
+from kal.active_strategies.strategy import Strategy
+from kal.active_strategies.supervised import SupervisedSampling
+from kal.active_strategies.kal import KALSampling, KALDiversitySampling, KALUncSampling, KALDiversityUncSampling, KALDropSampling, \
     KALDropUncSampling, KALDropDiversitySampling, KALDropDiversityUncSampling
-from .uncertainty import UncertaintySampling, UncertaintyDropoutSampling
-from .margin import MarginSampling, MarginDropoutSampling
-from .kmeans import KMeansSampling
-from .kcenter import KCenterSampling
-from .bald import BALDSampling, BALDSampling2
+from kal.active_strategies.uncertainty import UncertaintySampling, UncertaintyDropoutSampling
+from kal.active_strategies.margin import MarginSampling, MarginDropoutSampling
+from kal.active_strategies.kmeans import KMeansSampling
+from kal.active_strategies.kcenter import KCenterSampling
+from kal.active_strategies.bald import BALDSampling, BALDSampling2
 
 SUPERVISED = "Supervised"
 RANDOM = "Random"
@@ -49,18 +49,18 @@ KAL_STAR_DROP = "KAL_STAR_DROP"
 KAL_STAR_DROP_D = "KAL_STAR_DROP_D"
 KAL_STAR_DROP_U = "KAL_STAR_DROP_U"
 KAL_STAR_DROP_DU = "KAL_STAR_DROP_DU"
-KAL_LEN = "KAL_LEN"
-KAL_LEN_D = "KAL_LEN_D"
-KAL_LEN_U = "KAL_LEN_U"
-KAL_LEN_DU = "KAL_LEN_DU"
-KAL_LEN_DU_00 = "KAL_LEN_DU_00"
-KAL_LEN_DU_25 = "KAL_LEN_DU_25"
-KAL_LEN_DU_50 = "KAL_LEN_DU_50"
-KAL_LEN_DU_75 = "KAL_LEN_DU_75"
-KAL_LEN_DROP = "KAL_LEN_DROP"
-KAL_LEN_DROP_D = "KAL_LEN_DROP_D"
-KAL_LEN_DROP_U = "KAL_LEN_DROP_U"
-KAL_LEN_DROP_DU = "KAL_LEN_DROP_DU"
+KAL_XAI = "KAL_XAI"
+KAL_XAI_D = "KAL_XAI_D"
+KAL_XAI_U = "KAL_XAI_U"
+KAL_XAI_DU = "KAL_XAI_DU"
+KAL_XAI_DU_00 = "KAL_XAI_DU_00"
+KAL_XAI_DU_25 = "KAL_XAI_DU_25"
+KAL_XAI_DU_50 = "KAL_XAI_DU_50"
+KAL_XAI_DU_75 = "KAL_XAI_DU_75"
+KAL_XAI_DROP = "KAL_XAI_DROP"
+KAL_XAI_DROP_D = "KAL_XAI_DROP_D"
+KAL_XAI_DROP_U = "KAL_XAI_DROP_U"
+KAL_XAI_DROP_DU = "KAL_XAI_DROP_DU"
 UNCERTAINTY = "Uncertainty"
 UNCERTAINTY_D = "Uncertainty_D"
 MARGIN = "Margin"
@@ -94,8 +94,8 @@ STRATEGIES = [
     # KAL_DROP_U,
     # KAL_DROP_D,
     KAL_DROP_DU,
-    # KAL_LEN_DU,
-    # KAL_LEN_DROP_DU,
+    # KAL_XAI_DU,
+    # KAL_XAI_DROP_DU,
     # KAL_PLUS,
     # KAL_PLUS_U,
     # KAL_PLUS_D,
@@ -143,10 +143,10 @@ DROPOUTS = [
     KAL_DROP_U,
     KAL_DROP_D,
     KAL_DROP_DU,
-    KAL_LEN_DROP,
-    KAL_LEN_DROP_U,
-    KAL_LEN_DROP_D,
-    KAL_LEN_DROP_DU,
+    KAL_XAI_DROP,
+    KAL_XAI_DROP_U,
+    KAL_XAI_DROP_D,
+    KAL_XAI_DROP_DU,
     KAL_PLUS_DROP,
     KAL_PLUS_DROP_U,
     KAL_PLUS_DROP_D,
@@ -200,12 +200,12 @@ KAL_STARS = [
     KAL_STAR_DROP_DU
 ]
 
-KAL_LENS = [
-    KAL_LEN_DU,
-    KAL_LEN_DU_00,
-    KAL_LEN_DU_25,
-    KAL_LEN_DU_50,
-    KAL_LEN_DU_75
+KAL_XAIS = [
+    KAL_XAI_DU,
+    KAL_XAI_DU_00,
+    KAL_XAI_DU_25,
+    KAL_XAI_DU_50,
+    KAL_XAI_DU_75
 ]
 
 SAMPLING_STRATEGIES: Dict[str, Callable[..., Strategy]] = {
@@ -221,8 +221,8 @@ SAMPLING_STRATEGIES: Dict[str, Callable[..., Strategy]] = {
     KAL_DROP_DU: KALDropDiversityUncSampling,
     KAL_STAR_DU: KALDiversityUncSampling,
     KAL_STAR_DROP_DU: KALDropDiversityUncSampling,
-    KAL_LEN_DU: KALXAIDiversityUncSampling,
-    KAL_LEN_DROP_DU: KALXAIDropDiversityUncSampling,
+    KAL_XAI_DU: KALXAIDiversityUncSampling,
+    KAL_XAI_DROP_DU: KALXAIDropDiversityUncSampling,
     KAL_PLUS: KALPlusSampling,
     KAL_PLUS_U: KALPlusUncSampling,
     KAL_PLUS_D: KALPlusDiversitySampling,
@@ -254,10 +254,10 @@ SAMPLING_STRATEGIES: Dict[str, Callable[..., Strategy]] = {
     KAL_DU_25: KALDiversityUncSampling,
     KAL_DU_50: KALDiversityUncSampling,
     KAL_DU_75: KALDiversityUncSampling,
-    KAL_LEN_DU_00: KALDiversityUncSampling,
-    KAL_LEN_DU_25: KALDiversityUncSampling,
-    KAL_LEN_DU_50: KALDiversityUncSampling,
-    KAL_LEN_DU_75: KALDiversityUncSampling
+    KAL_XAI_DU_00: KALXAIDiversityUncSampling,
+    KAL_XAI_DU_25: KALXAIDiversityUncSampling,
+    KAL_XAI_DU_50: KALXAIDiversityUncSampling,
+    KAL_XAI_DU_75: KALXAIDiversityUncSampling
 }
 
 NAME_MAPPINGS_ABLATION_STUDY = {
@@ -300,6 +300,8 @@ NAME_MAPPINGS = {
     KAL_PLUS_DROP_DU: "KAL$_D^+$",
     KAL_STAR_DU: "KAL$^*$",
     KAL_STAR_DROP_DU: "KAL$_D^*$",
+    KAL_XAI_DU: "KAL$_{XAI}$",
+    KAL_XAI_DROP_DU: "KAL$_{XAI D}$",
     UNCERTAINTY: "LeastConf",
     UNCERTAINTY_D: "LeastConf"+"$_D$",
     MARGIN: MARGIN,

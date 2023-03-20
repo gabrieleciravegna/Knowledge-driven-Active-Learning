@@ -31,7 +31,7 @@ if __name__ == "__main__":
     from torch.utils.data import TensorDataset
 
     from kal.active_strategies import STRATEGIES, SAMPLING_STRATEGIES, ENTROPY_D, ENTROPY, ADV_DEEPFOOL, ADV_BIM, BALD, \
-        KALS, DROPOUTS, KAL_LEN_DROP_DU, KAL_LEN_DU, KAL_DU, KAL_DROP_DU
+        KALS, DROPOUTS, KAL_XAI_DROP_DU, KAL_XAI_DU, KAL_DU, KAL_DROP_DU
     from kal.knowledge.xor import XORLoss, steep_sigmoid
     from kal.metrics import F1
     from kal.network import MLP, train_loop, evaluate, predict_dropout, predict
@@ -57,9 +57,6 @@ if __name__ == "__main__":
     now = str(datetime.datetime.now()).replace(":", ".")
     dev = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
     print(f"Working on {dev}")
-
-    # strategies = STRATEGIES
-    strategies = [KAL_LEN_DU, KAL_LEN_DROP_DU]
 
     # %% md
 
@@ -89,7 +86,7 @@ if __name__ == "__main__":
     load = False
     first_points = 5
     n_points = 5
-    rand_points
+    rand_points = 2
     n_iterations = (75 - first_points) // n_points
     seeds = 10  #
     lr = 3 * 1e-3
@@ -97,7 +94,7 @@ if __name__ == "__main__":
     hidden_size = 100
 
     # strategies = STRATEGIES
-    strategies = [KAL_LEN_DU]
+    strategies = [KAL_XAI_DU]
     # strategies = DROPOUTS
     print("Strategies:", strategies)
     print("n_points", n_points, "n_iterations", n_iterations)
@@ -162,7 +159,7 @@ if __name__ == "__main__":
             if os.path.exists(df_file) and load:
                 df = pd.read_pickle(df_file)
                 dfs.append(df)
-                auc = df['Accuracy'].mean()
+                auc = df['Test Accuracy'].mean()
                 print(f"Already trained {df_file}, auc: {auc}")
                 continue
 
@@ -173,7 +170,8 @@ if __name__ == "__main__":
                 "Active Idx": [],
                 "Used Idx": [],
                 "Predictions": [],
-                "Accuracy": [],
+                "Train Accuracy": [],
+                "Test Accuracy": [],
                 "Supervision Loss": [],
                 "Active Loss": [],
                 "Time": [],
@@ -199,8 +197,9 @@ if __name__ == "__main__":
                 t = time.time()
 
                 losses += train_loop(net, train_dataset, used_idx, epochs,
-                                     lr=lr, loss=loss)
-                preds_t = predict(net, train_dataset)
+                                     lr=lr, loss=loss, device=dev)
+                train_accuracy, _, preds_t = evaluate(net, train_dataset, loss=loss, device=dev,
+                                                      return_preds=True, labelled_idx=used_idx)
 
                 if strategy in DROPOUTS:
                     preds_dropout = predict_dropout(net, train_dataset)
@@ -212,8 +211,8 @@ if __name__ == "__main__":
                 test_accuracy, sup_loss = evaluate(net, test_dataset, metric=metric,
                                                    loss=torch.nn.BCEWithLogitsLoss(reduction="none"))
                 active_idx, active_loss = active_strategy.selection(preds_t, used_idx,
-                                                                    n_points, x=x_t[train_idx],
-                                                                    labels=y_t[train_idx],
+                                                                    n_points, x=x_train,
+                                                                    labels=y_train,
                                                                     preds_dropout=preds_dropout,
                                                                     clf=net, dataset=train_dataset)
 
@@ -225,7 +224,8 @@ if __name__ == "__main__":
                 df["Active Idx"].append(active_idx.copy())
                 df["Used Idx"].append(used_idx.copy())
                 df["Predictions"].append(preds_t.cpu().numpy())
-                df["Accuracy"].append(test_accuracy)
+                df['Train Accuracy'].append(train_accuracy)
+                df["Test Accuracy"].append(test_accuracy)
                 df["Supervision Loss"].append(sup_loss)
                 df["Active Loss"].append(active_loss.cpu().numpy())
                 df["Time"].append((time.time() - t))
@@ -235,10 +235,10 @@ if __name__ == "__main__":
                 assert isinstance(used_idx, list), "Error"
 
                 pbar.set_description(f"{strategy} {seed + 1}/{seeds}, "
-                                     f"auc: {np.mean(df['Accuracy']):.2f}, "
+                                     f"train auc: {np.mean(df['Train Accuracy']):.2f}, "
+                                     f"test auc: {np.mean(df['Test Accuracy']):.2f}, "
                                      f"s_l: {mean(sup_loss):.2f}, "
                                      f"l: {losses[-1]:.2f}, p: {len(used_idx)}")
-                print("")
 
             if seed == 0:
                 sns.lineplot(data=losses)
@@ -257,8 +257,8 @@ if __name__ == "__main__":
     # dfs.to_pickle(f"{result_folder}\\metrics_{n_points}_points_{now}.pkl")
     dfs.to_pickle(f"{result_folder}\\results.pkl")
 
-    mean_auc = dfs.groupby("Strategy").mean().round(2)['Accuracy']
-    std_auc = dfs.groupby(["Strategy", "Seed"]).mean().groupby("Strategy").std().round(2)['Accuracy']
+    mean_auc = dfs.groupby("Strategy").mean().round(2)['Test Accuracy']
+    std_auc = dfs.groupby(["Strategy", "Seed"]).mean().groupby("Strategy").std().round(2)['Test Accuracy']
     print("AUC", mean_auc, "+-", std_auc)
 
     # %% md
@@ -272,11 +272,11 @@ if __name__ == "__main__":
             rc={'figure.figsize': (6, 5)})
     for strategy in strategies:
         # iterations = [10] if strategy != SUPERVISED else [15]
-        iterations = [*range(1, 10)]
+        iterations = [*range(0, 10)]
         for i in iterations:
             print(f"Iteration {i}/{len(iterations)} {strategy} strategy")
             png_file = os.path.join(f"{image_folder}", f"{strategy}_{i}.png")
             # if not os.path.exists(png_file):
             visualize_data_predictions(x_t, i, strategy, dfs, png_file,
-                                       dimensions=[2, 3], dataset="iris")
+                                       dimensions=[2, 3], dataset="iris", seed=0)
 

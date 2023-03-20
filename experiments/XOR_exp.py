@@ -9,7 +9,7 @@ if __name__ == "__main__":
     # %% md
     import os
 
-    os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
+    os.environ["CUDA_VISIBLE_DEVICES"] = ""
 
     import datetime
     import random
@@ -27,7 +27,7 @@ if __name__ == "__main__":
     from torch.utils.data import TensorDataset
 
     from kal.active_strategies import STRATEGIES, SAMPLING_STRATEGIES, ENTROPY_D, ENTROPY, ADV_DEEPFOOL, ADV_BIM, BALD, \
-        KALS, DROPOUTS, KAL_LEN_DROP_DU, KAL_LEN_DU, KAL_DU, KAL_DROP_DU
+        KALS, DROPOUTS, KAL_XAI_DROP_DU, KAL_XAI_DU, KAL_DU, KAL_DROP_DU
     from kal.knowledge.xor import XORLoss, steep_sigmoid
     from kal.metrics import F1
     from kal.network import MLP, train_loop, evaluate, predict_dropout, predict
@@ -55,7 +55,7 @@ if __name__ == "__main__":
     print(f"Working on {dev}")
 
     # strategies = STRATEGIES
-    strategies = [KAL_LEN_DROP_DU]
+    strategies = [KAL_XAI_DU]
 
     # %% md
     #### Generating and visualizing data for the xor problem
@@ -113,7 +113,7 @@ if __name__ == "__main__":
     x1 = discrete_x[:, 0]
     x2 = discrete_x[:, 1]
     pred_rule = (x1 * (1 - x2)) + (x2 * (1 - x1))
-    print("Rule Accuracy:", f1_score(y_t, pred_rule > 0.5)* 100)
+    print("Rule Accuracy:", f1_score(y_t.cpu(), pred_rule.cpu() > 0.5)* 100)
     # sns.scatterplot(x=x_t[:, 0].numpy(), y=x_t[:, 1].numpy(), hue=pred_rule)
     # plt.show()
 
@@ -124,7 +124,7 @@ if __name__ == "__main__":
     dfs = []
     skf = StratifiedKFold(n_splits=seeds)
 
-    for seed, (train_idx, test_idx) in enumerate(skf.split(x_t, y_t)):
+    for seed, (train_idx, test_idx) in enumerate(skf.split(x_t.cpu(), y_t.cpu())):
         train_sample = len(train_idx)
         set_seed(seed)
         first_idx = np.random.choice(train_sample, first_points, replace=False).tolist()
@@ -143,7 +143,7 @@ if __name__ == "__main__":
             if os.path.exists(df_file) and load:
                 df = pd.read_pickle(df_file)
                 dfs.append(df)
-                auc = df['Accuracy'].mean()
+                auc = df['Test Accuracy'].mean()
                 print(f"Already trained {df_file}, auc: {auc}")
                 continue
 
@@ -154,7 +154,8 @@ if __name__ == "__main__":
                 "Active Idx": [],
                 "Used Idx": [],
                 "Predictions": [],
-                "Accuracy": [],
+                "Train Accuracy": [],
+                "Test Accuracy": [],
                 "Supervision Loss": [],
                 "Active Loss": [],
                 "Time": [],
@@ -162,7 +163,7 @@ if __name__ == "__main__":
                 "Test Idx": []
             }
 
-            if strategy in [ADV_DEEPFOOL, ADV_BIM, ENTROPY, ENTROPY_D, BALD, KAL_LEN_DU, KAL_LEN_DROP_DU]:
+            if strategy in [ADV_DEEPFOOL, ADV_BIM, ENTROPY, ENTROPY_D, BALD, KAL_XAI_DU, KAL_XAI_DROP_DU]:
                 n_classes = 2
                 x_train, y_train = x_t[train_idx], y_multi_t[train_idx]
                 x_test, y_test = x_t[test_idx], y_multi_t[test_idx]
@@ -187,8 +188,8 @@ if __name__ == "__main__":
 
                 losses += train_loop(net, train_dataset, used_idx, epochs,
                                      lr=lr, loss=loss)
-                preds_t = predict(net, train_dataset)
-
+                train_accuracy, _, preds_t = evaluate(net, train_dataset, loss=loss, device=dev,
+                                                      return_preds=True, labelled_idx=used_idx)
                 if strategy in DROPOUTS:
                     preds_dropout = predict_dropout(net, train_dataset)
                     assert (preds_dropout - preds_t).abs().sum() > .1, \
@@ -212,7 +213,8 @@ if __name__ == "__main__":
                 df["Active Idx"].append(active_idx.copy())
                 df["Used Idx"].append(used_idx.copy())
                 df["Predictions"].append(preds_t.cpu().numpy())
-                df["Accuracy"].append(test_accuracy)
+                df['Train Accuracy'].append(train_accuracy)
+                df["Test Accuracy"].append(test_accuracy)
                 df["Supervision Loss"].append(sup_loss)
                 df["Active Loss"].append(active_loss.cpu().numpy())
                 df["Time"].append((time.time() - t))
@@ -222,10 +224,10 @@ if __name__ == "__main__":
                 assert isinstance(used_idx, list), "Error"
 
                 pbar.set_description(f"{strategy} {seed + 1}/{seeds}, "
-                                     f"auc: {np.mean(df['Accuracy']):.2f}, "
-                                     f"s_l: {mean(sup_loss):.2f}, "
+                                     f"train auc: {np.mean(df['Train Accuracy']):.2f}, "
+                                     f"test auc: {np.mean(df['Test Accuracy']):.2f}, "
+                                     f"a_l: {active_loss.mean().item():.2f}, "
                                      f"l: {losses[-1]:.2f}, p: {len(used_idx)}")
-                print("")
 
             if seed == 0:
                 sns.lineplot(data=losses)
@@ -244,8 +246,8 @@ if __name__ == "__main__":
     # dfs.to_pickle(f"{result_folder}\\metrics_{n_points}_points_{now}.pkl")
     dfs.to_pickle(f"{result_folder}\\results.pkl")
 
-    mean_auc = dfs.groupby("Strategy").mean().round(2)['Accuracy']
-    std_auc = dfs.groupby(["Strategy", "Seed"]).mean().groupby("Strategy").std().round(2)['Accuracy']
+    mean_auc = dfs.groupby("Strategy").mean().round(2)['Test Accuracy']
+    std_auc = dfs.groupby(["Strategy", "Seed"]).mean().groupby("Strategy").std().round(2)['Test Accuracy']
     print("AUC", mean_auc, "+-", std_auc)
 
     # %% md

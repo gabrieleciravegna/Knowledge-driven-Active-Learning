@@ -18,6 +18,6 @@ class RandomSampling(Strategy):
 
         n_sample = preds.shape[0]
         avail_idx = list(set(np.arange(n_sample)) - set(labelled_idx))
-        random_idx: List = np.random.choice(avail_idx, n_p).tolist()
+        random_idx: List = np.random.choice(avail_idx, n_p, replace=False).tolist()
 
         return random_idx, self.loss(preds)

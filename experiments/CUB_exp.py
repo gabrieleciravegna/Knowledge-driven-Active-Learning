@@ -15,7 +15,7 @@ if __name__ == "__main__":
     #%autosave 10
 
     import os
-    os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
+    os.environ["CUDA_VISIBLE_DEVICES"] = ""
     os.environ["PYTHONPYCACHEPREFIX"] = os.path.join("..", "__pycache__")
 
     import tqdm
@@ -37,7 +37,7 @@ if __name__ == "__main__":
     from tqdm import trange
     from sklearn.model_selection import StratifiedKFold
 
-    from kal.active_strategies import SAMPLING_STRATEGIES, ADV_DEEPFOOL, KALS, DROPOUTS, KAL_LEN_DU, KAL_LEN_DROP_DU
+    from kal.active_strategies import SAMPLING_STRATEGIES, ADV_DEEPFOOL, KALS, DROPOUTS, KAL_XAI_DU, KAL_XAI_DROP_DU
     from kal.network import MLP, train_loop, evaluate, predict, predict_dropout
     from kal.utils import set_seed
 
@@ -80,16 +80,16 @@ if __name__ == "__main__":
     hidden_size = num_classes * 2
     lr = 1e-3
     metric = F1()
-    load = True
+    load = False
     mutual_excl = True
 
-    # strategies = KAL_LENS
-    strategies = [KAL_LEN_DU, KAL_LEN_DROP_DU]
+    # strategies = KAL_XAIS
+    strategies = [KAL_XAI_DU, KAL_XAI_DROP_DU]
     # strategies = STRATEGIES[:-1]
     # strategies += [s for s in KAL_PARTIAL if s not in STRATEGIES]
     # strategies =
     # strategies = KALS[::-1]
-    # strategies = [KAL_LEN_DU]
+    # strategies = [KAL_XAI_DU]
     # strategies = FAST_STRATEGIES
     # strategies = [ENTROPY_D, ENTROPY, MARGIN_D, MARGIN, ]
     # strategies = KALS[::-1]

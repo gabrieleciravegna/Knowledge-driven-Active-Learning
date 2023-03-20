@@ -5,11 +5,7 @@ import torch
 from torch import Tensor
 
 from . import KnowledgeLoss
-
-
-def steep_sigmoid(x: torch.Tensor, k=100, b=0.5) -> torch.Tensor:
-    output: torch.Tensor = 1 / (1 + torch.exp(-k * (x - b)))
-    return output
+from ..utils import steep_sigmoid
 
 
 class IrisLoss(KnowledgeLoss):
