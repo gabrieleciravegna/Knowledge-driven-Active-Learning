@@ -76,6 +76,7 @@ class KALXAISampling(Strategy):
                 formulas = self.xai_model.explain_cv(n_classes, preds, labelled_idx, self.main_classes)
         else:
             formulas = self.xai_model.explain(x, labels, labelled_idx)
+        print("Extracted formulas:", formulas)
 
         if c_loss is None and arg_max is None:
             c_loss, arg_max = self.loss(preds, x=x, formulas=formulas,

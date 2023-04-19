@@ -55,7 +55,6 @@ if __name__ == "__main__":
     print(f"Working on {dev}")
 
     # strategies = STRATEGIES
-    strategies = [KAL_XAI_DU]
 
     # %% md
     #### Generating and visualizing data for the xor problem
@@ -269,8 +268,8 @@ if __name__ == "__main__":
             for i in iterations:
                 print(f"Iteration {i}/{len(iterations)} {strategy} strategy")
                 png_file = os.path.join(f"{image_folder}", f"{strategy}_it_{i}_s_{seed}.png")
-                if not os.path.exists(png_file) or strategy in KALS:
+                if not os.path.exists(png_file) or True:
                     visualize_data_predictions(x_t, i, strategy, dfs, png_file,
                                                seed=seed)
                 else:
-                    print(png_file + " Already extisting")
+                    print(png_file + " Already existing")
