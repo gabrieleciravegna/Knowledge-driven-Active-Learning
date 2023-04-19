@@ -115,7 +115,7 @@ if __name__ == "__main__":
 
     first_points = 10
     n_points = 10
-    n_iterations = (500 - first_points) // n_points
+    n_iterations = (300 - first_points) // n_points
     seeds = 10  #
     lr = 1e-3
     epochs = 100
@@ -193,6 +193,7 @@ if __name__ == "__main__":
                 "Active Idx": [],
                 "Used Idx": [],
                 "Predictions": [],
+                "Train Accuracy": [],
                 "Test Accuracy": [],
                 "Supervision Loss": [],
                 "Active Loss": [],
@@ -221,26 +222,34 @@ if __name__ == "__main__":
             used_idx = first_idx.copy()
             losses = []
             for it in (pbar := tqdm.trange(1, n_iterations + 1)):
-                t = time.time()
 
-                losses += train_loop(net, train_dataset, used_idx, epochs,
+                losses += train_loop(net, train_dataset, used_idx, epochs, device=dev,
                                      lr=lr, loss=loss)
 
-                preds_t = predict(net, train_dataset)
+                t = time.time()
+                train_accuracy, _, preds_t = evaluate(net, train_dataset, loss=loss, device=dev,
+                                                      return_preds=True, labelled_idx=used_idx)
+                pred_time = time.time() - t
+                print(f"Pred time {pred_time:2f}")
                 if strategy in DROPOUTS:
+                    t = time.time()
                     preds_dropout = predict_dropout(net, train_dataset)
-                    assert (preds_dropout - preds_t).abs().sum() > .0, \
+                    assert (preds_dropout - preds_t).abs().sum() > .1, \
                         "Error in computing dropout predictions"
+                    pred_time = time.time() - t
+                    print(f"Dropout time {pred_time:2f}")
                 else:
                     preds_dropout = None
 
                 test_accuracy, sup_loss = evaluate(net, test_dataset, metric=metric,
                                                    loss=loss)
 
+                t = time.time()
                 active_idx, active_loss = active_strategy.selection(preds_t, used_idx, n_points,
                                                                     x=x_t[train_idx], labels=y_t[train_idx],
                                                                     preds_dropout=preds_dropout,
                                                                     clf=net, dataset=train_dataset)
+                used_time = (time.time() - t)
                 used_idx += active_idx
 
                 df["Strategy"].append(strategy)
@@ -249,20 +258,21 @@ if __name__ == "__main__":
                 df["Active Idx"].append(active_idx.copy())
                 df["Used Idx"].append(used_idx.copy())
                 df["Predictions"].append(preds_t.cpu().numpy())
+                df['Train Accuracy'].append(train_accuracy)
                 df["Test Accuracy"].append(test_accuracy)
                 df["Supervision Loss"].append(sup_loss)
                 df["Active Loss"].append(active_loss.cpu().numpy())
-                df["Time"].append((time.time() - t))
+                df["Time"].append(used_time)
                 df["Train Idx"].append(train_idx)
                 df["Test Idx"].append(test_idx)
 
                 assert isinstance(used_idx, list), "Error"
 
                 pbar.set_description(f"{strategy} {seed + 1}/{seeds}, "
-                                     f"auc: {np.mean(df['Test Accuracy']):.3f}, "
-                                     f"s_l: {mean(sup_loss):.3f}, "
-                                     f"l: {losses[-1]:.3f}, p: {len(used_idx)}")
-
+                                     f"train auc: {np.mean(df['Train Accuracy']):.2f}, "
+                                     f"test auc: {np.mean(df['Test Accuracy']):.2f}, "
+                                     f"a_l: {active_loss.mean().item():.2f}, "
+                                     f"l: {losses[-1]:.2f}, p: {len(used_idx)}")
             if seed == 0:
                 sns.lineplot(data=losses)
                 plt.yscale("log")
@@ -304,56 +314,6 @@ if __name__ == "__main__":
             Strategies.append(NAME_MAPPINGS_LATEX[row['Strategy']])
     dfs['Strategy'] = Strategies
 
-    # aucs = []
-    # dfs_auc_mean = dfs.groupby("Strategy").mean()['Accuracy'].tolist()
-    # dfs_auc_std = dfs.groupby(["Strategy", "Seed"]).mean()['Accuracy'] \
-    #     .groupby("Strategy").std().tolist()
-    # for mean, std in zip(dfs_auc_mean, dfs_auc_std):
-    #     auc = f"${mean:.2f}$ {{\\tiny $\\pm {std:.2f}$ }}"
-    #     aucs.append(auc)
-    # df_auc = pd.DataFrame({
-    #     "Strategy": np.unique(Strategies),
-    #     "AUC": aucs,
-    # }).set_index("Strategy")
-    # print(df_auc.to_latex(float_format="%.2f", escape=False))
-    # with open(os.path.join(f"{result_folder}",
-    #                        f"table_auc_latex_{now}.txt"), "w") as f:
-    #     f.write(df_auc.to_latex(float_format="%.2f", escape=False))
-    #
-    # final_accs = []
-    # dfs_final_accs = dfs[dfs['Iteration'] == n_iterations - 1]
-    # final_accs_mean = dfs_final_accs.groupby("Strategy").mean()['Accuracy'].tolist()
-    # final_accs_std = dfs_final_accs.groupby("Strategy").std()['Accuracy'].tolist()
-    # for mean, std in zip(final_accs_mean, final_accs_std):
-    #     final_acc = f"${mean:.2f}$ {{\\tiny $\\pm {std:.2f}$ }}"
-    #     final_accs.append(final_acc)
-    # df_final_acc = pd.DataFrame({
-    #     "Strategy": np.unique(Strategies),
-    #     "Final F1": final_accs,
-    # }).set_index("Strategy")
-    # print(df_final_acc.to_latex(float_format="%.2f", escape=False))
-    # with open(os.path.join(f"{result_folder}",
-    #                        f"table_final_acc_latex_{now}.txt"), "w") as f:
-    #     f.write(df_final_acc.to_latex(float_format="%.2f", escape=False))
-    #
-    # times = []
-    # dfs_time_mean = dfs.groupby("Strategy").mean()['Time']
-    # base_time = dfs_time_mean[dfs_time_mean.index == RANDOM].item()
-    # for time in dfs_time_mean.tolist():
-    #     time = time / base_time
-    #     time = time if time >= 1. else 1.
-    #     time = f"${time:.2f}$ x"
-    #     times.append(time)
-    # df_times = pd.DataFrame({
-    #     "Strategy": np.unique(Strategies),
-    #     "Times": times
-    # }).set_index("Strategy")
-    # print(df_times.to_latex(float_format="%.2f", escape=False))
-    # with open(os.path.join(f"{result_folder}",
-    #                        f"table_times_latex_{now}.txt"), "w") as f:
-    #     f.write(df_times.to_latex(float_format="%.2f", escape=False))
-    #
-    # # %%
 
     sns.set(style="whitegrid", font_scale=1.5,
             rc={'figure.figsize': (10, 8)})

@@ -39,7 +39,7 @@ class KALXAISampling(Strategy):
                     k_loss = Expl_2_Loss_CV(self.class_names, formulas, uncertainty,
                                             main_classes, attribute_classes,
                                             mutual_excl=self.mutual_excl, double_imp=self.double_imp)
-                    c_loss += [k_loss(preds, x=x)]
+                    c_loss += [k_loss(preds)]
                 c_loss = torch.stack(c_loss, dim=1)
                 arg_max = c_loss.argmax(dim=1)
                 c_loss = c_loss.sum(dim=1)
@@ -48,7 +48,7 @@ class KALXAISampling(Strategy):
                 k_loss = Expl_2_Loss_CV(self.class_names, formulas, uncertainty,
                                         self.main_classes, attribute_classes,
                                         mutual_excl=self.mutual_excl, double_imp=self.double_imp)
-                c_loss, arg_max = k_loss(preds, x=x, return_argmax=True)
+                c_loss, arg_max = k_loss(preds, return_argmax=True)
         else:
             k_loss = Expl_2_Loss(self.class_names, formulas, uncertainty=uncertainty,
                                  mutual_excl=self.mutual_excl, double_imp=self.double_imp)

@@ -68,7 +68,7 @@ if __name__ == "__main__":
     print(f"Working on {dev}")
 
     #%%
-    first_points = 2000
+    first_points = 500
     n_points = 100
     rand_points = 20
     n_iterations = 48
@@ -80,6 +80,7 @@ if __name__ == "__main__":
     load = True
     print("Rand points", rand_points)
     KLoss = None
+    discretize_feats = True
 
     # strategies = STRATEGIES
     strategies = [KAL_XAI_DU, KAL_XAI_DROP_DU]
@@ -163,7 +164,8 @@ if __name__ == "__main__":
                                                             hidden_size=hidden_size,
                                                             dev=dev, cv=True,
                                                             class_names=class_names,
-                                                            height=3)
+                                                            height=3,
+                                                            discretize_feats=True)
             df_file = os.path.join(result_folder, f"metrics_{n_points}_points_"
                                                   f"{seed}_seed_{strategy}_strategy.pkl")
             if os.path.exists(df_file) and load:

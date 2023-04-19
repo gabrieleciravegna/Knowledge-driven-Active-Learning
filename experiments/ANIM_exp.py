@@ -15,7 +15,7 @@ if __name__ == "__main__":
     #%autosave 10
 
     import os
-    os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
+    os.environ["CUDA_VISIBLE_DEVICES"] = ""
     os.environ["PYTHONPYCACHEPREFIX"] = os.path.join("..", "__pycache__")
 
     import tqdm
@@ -37,7 +37,8 @@ if __name__ == "__main__":
     from tqdm import trange
     from sklearn.model_selection import StratifiedKFold
 
-    from kal.active_strategies import SAMPLING_STRATEGIES, ADV_DEEPFOOL, KALS, DROPOUTS, KAL_XAI_DU, KAL_XAI_DROP_DU
+    from kal.active_strategies import SAMPLING_STRATEGIES, ADV_DEEPFOOL, KALS, DROPOUTS, KAL_XAI_DU, KAL_XAI_DROP_DU, \
+    STRATEGIES, MARGIN, KAL_DU
     from kal.network import MLP, train_loop, evaluate, predict, predict_dropout
     from kal.utils import set_seed
 
@@ -77,20 +78,20 @@ if __name__ == "__main__":
     lr = 1e-3
     epochs = 250
     main_classes = range(7)
-    discretize_feats = False
+    discretize_feats = True
     metric = F1()
-    load = False
+    load = True
     print("Rand points", rand_points)
 
-    # strategies = [BALD]
-    strategies = [KAL_XAI_DU]
+    strategies = [KAL_DU, KAL_XAI_DU]
     # # strategies.pop(strategies.index(KMEANS))
     # # strategies.pop(strategies.index(KCENTER))
-    # strategies.pop(strategies.index(ADV_DEEPFOOL))
     # strategies.pop(strategies.index(ADV_BIM))
     # strategies = [ENTROPY_D, ENTROPY, MARGIN_D, MARGIN, ]
     # strategies = KALS[::-1]
     # strategies = KALS
+    # strategies = [MARGIN]
+
     print("Strategies:", strategies)
     print("n_points", n_points, "n_iterations", n_iterations)
 
@@ -166,13 +167,14 @@ if __name__ == "__main__":
                                                             rand_points=rand_points,
                                                             hidden_size=hidden_size,
                                                             dev=dev, cv=True,
-                                                            discretize_feats=discretize_feats,
                                                             class_names=class_names)
             df_file = os.path.join(result_folder, f"metrics_{n_points}_points_"
                                                   f"{seed}_seed_{strategy}_strategy.pkl")
             if os.path.exists(df_file) and load:
                 df = pd.read_pickle(df_file)
                 dfs.append(df)
+                if "Accuracy" in df.columns:
+                    df['Test Accuracy'] = df['Accuracy']
                 auc = df['Test Accuracy'].mean()
                 print(f"Already trained {df_file}, auc: {auc:.2f}")
                 continue
@@ -209,27 +211,33 @@ if __name__ == "__main__":
             losses = []
             used_idx = first_idx.copy()
             for it in (pbar := tqdm.trange(1, n_iterations + 1)):
-                t = time.time()
-
                 losses += train_loop(net, train_dataset, used_idx, epochs,
                                      lr=lr, loss=loss, device=dev)
+                t = time.time()
                 train_accuracy, _, preds_t = evaluate(net, train_dataset, loss=loss, device=dev,
-                                                      labelled_idx=used_idx, return_preds=True)
+                                                      return_preds=True, labelled_idx=used_idx)
+                pred_time = time.time() - t
+                print(f"Pred time {pred_time:2f}")
                 if strategy in DROPOUTS:
+                    t = time.time()
                     preds_dropout = predict_dropout(net, train_dataset, device=dev)
-                    assert (preds_dropout - preds_t).abs().sum() > .0, \
+                    assert (preds_dropout - preds_t).abs().sum() > .1, \
                         "Error in computing dropout predictions"
+                    pred_time = time.time() - t
+                    print(f"Dropout time {pred_time:2f}")
                 else:
                     preds_dropout = None
 
                 test_accuracy, sup_loss = evaluate(net, test_dataset, metric=metric, loss=loss, device=dev)
 
+                t = time.time()
                 active_idx, active_loss = active_strategy.selection(preds_t, used_idx,
-                                                                    n_points, labels=y_train,
+                                                                    n_points, x=x_train,
+                                                                    labels=y_train,
                                                                     preds_dropout=preds_dropout,
                                                                     clf=net, dataset=train_dataset,
-                                                                    )
-
+                                                                    main_classes=main_classes)
+                used_time = time.time() - t
                 used_idx += active_idx
 
                 df["Strategy"].append(strategy)
@@ -242,7 +250,7 @@ if __name__ == "__main__":
                 df["Test Accuracy"].append(test_accuracy)
                 df["Supervision Loss"].append(sup_loss)
                 df["Active Loss"].append(active_loss.cpu().numpy())
-                df["Time"].append((time.time() - t))
+                df["Time"].append(used_time)
                 df["Train Idx"].append(train_idx)
                 df["Test Idx"].append(test_idx)
 

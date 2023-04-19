@@ -183,7 +183,6 @@ for seed, (train_idx, test_idx) in enumerate(skf.split(x_t.cpu(), y_t.cpu())):
             "Test Idx": []
         }
 
-
         loss = torch.nn.BCEWithLogitsLoss(reduction="none")
         metric = F1()
 

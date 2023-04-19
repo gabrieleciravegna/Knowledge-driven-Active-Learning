@@ -83,20 +83,19 @@ if __name__ == "__main__":
     n_classes = y.shape[1]
 
     KLoss = IrisLoss
-    load = False
+    load = True
     first_points = 5
     n_points = 5
     rand_points = 2
-    n_iterations = (75 - first_points) // n_points
+    n_iterations = (50 - first_points) // n_points
     seeds = 10  #
     lr = 3 * 1e-3
     epochs = 200
     hidden_size = 100
     discretize_feats = False
 
-    # strategies = STRATEGIES
-    strategies = [KAL_XAI_DU]
-    # strategies = DROPOUTS
+    strategies = [KAL_DU, KAL_XAI_DU]
+
     print("Strategies:", strategies)
     print("n_points", n_points, "n_iterations", n_iterations)
     #%% md
@@ -161,6 +160,8 @@ if __name__ == "__main__":
             if os.path.exists(df_file) and load:
                 df = pd.read_pickle(df_file)
                 dfs.append(df)
+                if "Accuracy" in df.columns:
+                    df['Test Accuracy'] = df['Accuracy']
                 auc = df['Test Accuracy'].mean()
                 print(f"Already trained {df_file}, auc: {auc}")
                 continue
@@ -196,28 +197,36 @@ if __name__ == "__main__":
             losses = []
             used_idx = first_idx.copy()
             for it in (pbar := tqdm.trange(n_iterations)):
-                t = time.time()
 
                 losses += train_loop(net, train_dataset, used_idx, epochs,
                                      lr=lr, loss=loss, device=dev)
+
+                t = time.time()
                 train_accuracy, _, preds_t = evaluate(net, train_dataset, loss=loss, device=dev,
                                                       return_preds=True, labelled_idx=used_idx)
+                pred_time = time.time() - t
+                print(f"Pred time {pred_time:2f}")
 
                 if strategy in DROPOUTS:
+                    t = time.time()
                     preds_dropout = predict_dropout(net, train_dataset)
-                    assert (preds_dropout - preds_t).abs().sum() > .0, \
+                    assert (preds_dropout - preds_t).abs().sum() > .1, \
                         "Error in computing dropout predictions"
+                    pred_time = time.time() - t
+                    print(f"Dropout time {pred_time:2f}")
                 else:
                     preds_dropout = None
 
                 test_accuracy, sup_loss = evaluate(net, test_dataset, metric=metric,
                                                    loss=torch.nn.BCEWithLogitsLoss(reduction="none"))
+                t = time.time()
                 active_idx, active_loss = active_strategy.selection(preds_t, used_idx,
                                                                     n_points, x=x_train,
                                                                     labels=y_train,
                                                                     preds_dropout=preds_dropout,
                                                                     clf=net, dataset=train_dataset)
 
+                used_time = time.time() - t
                 used_idx += active_idx
 
                 df["Strategy"].append(strategy)
@@ -230,7 +239,7 @@ if __name__ == "__main__":
                 df["Test Accuracy"].append(test_accuracy)
                 df["Supervision Loss"].append(sup_loss)
                 df["Active Loss"].append(active_loss.cpu().numpy())
-                df["Time"].append((time.time() - t))
+                df["Time"].append(used_time)
                 df["Train Idx"].append(train_idx)
                 df["Test Idx"].append(test_idx)
 

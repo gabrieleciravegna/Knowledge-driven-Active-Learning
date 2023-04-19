@@ -37,7 +37,8 @@ if __name__ == "__main__":
     from tqdm import trange
     from sklearn.model_selection import StratifiedKFold
 
-    from kal.active_strategies import SAMPLING_STRATEGIES, ADV_DEEPFOOL, KALS, DROPOUTS, KAL_XAI_DU, KAL_XAI_DROP_DU
+    from kal.active_strategies import SAMPLING_STRATEGIES, ADV_DEEPFOOL, KALS, DROPOUTS, KAL_XAI_DU, KAL_XAI_DROP_DU, \
+    STRATEGIES, KAL_DU
     from kal.network import MLP, train_loop, evaluate, predict, predict_dropout
     from kal.utils import set_seed
 
@@ -80,13 +81,13 @@ if __name__ == "__main__":
     hidden_size = num_classes * 2
     lr = 1e-3
     metric = F1()
-    load = False
+    load = True
     mutual_excl = True
     discretize_feats = True
 
     # strategies = KAL_XAIS
-    strategies = [KAL_XAI_DU, KAL_XAI_DROP_DU]
-    # strategies = STRATEGIES[:-1]
+    strategies = [KAL_DU, KAL_XAI_DU]
+    # strategies.pop(strategies.index(ADV_DEEPFOOL))
     # strategies += [s for s in KAL_PARTIAL if s not in STRATEGIES]
     # strategies =
     # strategies = KALS[::-1]
@@ -211,27 +212,31 @@ if __name__ == "__main__":
             losses = []
             used_idx = first_idx.copy()
             for it in (pbar := tqdm.trange(1, n_iterations + 1)):
-                t = time.time()
-
                 losses += train_loop(net, train_dataset, used_idx, epochs,
                                      lr=lr, loss=loss, device=dev)
-                train_accuracy, _, preds_t = evaluate(net, train_dataset, loss=loss,
-                                                      device=dev, return_preds=True)
+                t = time.time()
+                train_accuracy, _, preds_t = evaluate(net, train_dataset, loss=loss, device=dev,
+                                                      return_preds=True, labelled_idx=used_idx)
                 if strategy in DROPOUTS:
+                    t = time.time()
                     preds_dropout = predict_dropout(net, train_dataset, device=dev)
-                    assert (preds_dropout - preds_t).abs().sum() > .0, \
+                    assert (preds_dropout - preds_t).abs().sum() > .1, \
                         "Error in computing dropout predictions"
+                    pred_time = time.time() - t
+                    print(f"Dropout time {pred_time:2f}")
                 else:
                     preds_dropout = None
 
                 test_accuracy, sup_loss = evaluate(net, test_dataset, metric=metric, loss=loss, device=dev)
 
+                t = time.time()
                 active_idx, active_loss = active_strategy.selection(preds_t, used_idx,
-                                                                    n_points, labels=y_train,
+                                                                    n_points, x=x_train,
+                                                                    labels=y_train,
                                                                     preds_dropout=preds_dropout,
                                                                     clf=net, dataset=train_dataset,
-                                                                    )
-
+                                                                    main_classes=main_classes)
+                used_time = time.time() - t
                 used_idx += active_idx
 
                 df["Strategy"].append(strategy)
@@ -244,7 +249,7 @@ if __name__ == "__main__":
                 df["Test Accuracy"].append(test_accuracy)
                 df["Supervision Loss"].append(sup_loss)
                 df["Active Loss"].append(active_loss.cpu().numpy())
-                df["Time"].append((time.time() - t))
+                df["Time"].append(used_time)
                 df["Train Idx"].append(train_idx)
                 df["Test Idx"].append(test_idx)
 
@@ -277,7 +282,7 @@ if __name__ == "__main__":
 
     mean_auc = dfs.groupby("Strategy").mean().round(2)['Test Accuracy']
     std_auc = dfs.groupby(["Strategy", "Seed"]).mean().groupby("Strategy").std().round(2)['Test Accuracy']
-    print("AUC", mean_auc.item(), "+-", std_auc.item())
+    print("AUC", mean_auc, "+-", std_auc)
     # %% md
 
     #### Displaying some pictures to visualize training

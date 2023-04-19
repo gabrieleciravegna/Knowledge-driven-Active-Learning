@@ -40,11 +40,11 @@ def visualize_data_predictions(x_t: torch.Tensor, itr: int, act_strategy: str,
     # multi_class = False
     if dataset == "xor":
         if len(preds.shape) > 1:
-            preds = preds[:, 0]
+            preds = preds[:, 1]
         new_idx = [1 if idx in a_idx else 0 for idx in u_idx]
-        sns.scatterplot(x=x_0, y=x_1, hue=preds, legend=True)
+        sns.scatterplot(x=x_0, y=x_1, hue=preds, legend=False)
         sns.scatterplot(x=x_0[np.asarray(u_idx)], y=x_1[np.asarray(u_idx)],
-                        hue=new_idx, size=new_idx, legend=True)
+                        hue=new_idx, size=new_idx, sizes=[70, 100], legend=False)
         plt.xlabel("$x_1$")
         plt.ylabel("$x_2$")
     else:
@@ -65,7 +65,8 @@ def visualize_data_predictions(x_t: torch.Tensor, itr: int, act_strategy: str,
     plt.axvline(0.5, 0, 1, c="k")
     # plt.title(f"Points selected by {act_strategy}, iter {itr}, "
     #           f"acc {acc:.2f}, n_points{n_points}")
-    plt.title(f"{NAME_MAPPINGS[act_strategy]} - {n_points} p - {acc:.2f} %", fontsize=28)
+    plt.title(f"{NAME_MAPPINGS[act_strategy]} ")
+              # f"- {n_points} p - {acc:.2f} %", fontsize=28)
     plt.xticks([0.0, 0.5, 1.0])
     plt.yticks([0.0, 0.5, 1.0])
     sns.despine(left=True, bottom=True)

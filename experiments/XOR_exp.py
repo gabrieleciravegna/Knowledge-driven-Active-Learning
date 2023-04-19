@@ -55,6 +55,7 @@ if __name__ == "__main__":
     print(f"Working on {dev}")
 
     # strategies = STRATEGIES
+    strategies = [KAL_XAI_DU]
 
     # %% md
     #### Generating and visualizing data for the xor problem
@@ -66,7 +67,7 @@ if __name__ == "__main__":
     first_points = 10
     n_points = 5
     rand_points = 2
-    n_iterations = (400 - first_points) // n_points
+    n_iterations = (100 - first_points) // n_points
     input_size = 2
     hidden_size = 200
     seeds = 10
@@ -185,27 +186,34 @@ if __name__ == "__main__":
             losses = []
             used_idx = first_idx.copy()
             for it in (pbar := tqdm.trange(n_iterations)):
-                t = time.time()
 
                 losses += train_loop(net, train_dataset, used_idx, epochs,
-                                     lr=lr, loss=loss)
+                                     lr=lr, loss=loss, device=dev)
+                t = time.time()
                 train_accuracy, _, preds_t = evaluate(net, train_dataset, loss=loss, device=dev,
                                                       return_preds=True, labelled_idx=used_idx)
+                pred_t = time.time() - t
+                print(f"Pred time {pred_t:2f}")
                 if strategy in DROPOUTS:
+                    t = time.time()
                     preds_dropout = predict_dropout(net, train_dataset)
                     assert (preds_dropout - preds_t).abs().sum() > .1, \
                         "Error in computing dropout predictions"
+                    pred_t = time.time() - t
+                    print(f"Dropout time {pred_t:2f}")
+
                 else:
                     preds_dropout = None
 
-                test_accuracy, sup_loss = evaluate(net, test_dataset, metric=metric,
+                test_accuracy, sup_loss = evaluate(net, test_dataset, metric=metric, device=dev,
                                                    loss=torch.nn.BCEWithLogitsLoss(reduction="none"))
+                t = time.time()
                 active_idx, active_loss = active_strategy.selection(preds_t, used_idx,
-                                                                    n_points, x=x_t[train_idx],
-                                                                    labels=y_t[train_idx],
+                                                                    n_points, x=x_train,
+                                                                    labels=y_train,
                                                                     preds_dropout=preds_dropout,
                                                                     clf=net, dataset=train_dataset)
-
+                used_time = time.time() - t
                 used_idx += active_idx
 
                 df["Strategy"].append(strategy)
@@ -218,7 +226,7 @@ if __name__ == "__main__":
                 df["Test Accuracy"].append(test_accuracy)
                 df["Supervision Loss"].append(sup_loss)
                 df["Active Loss"].append(active_loss.cpu().numpy())
-                df["Time"].append((time.time() - t))
+                df["Time"].append(used_time)
                 df["Train Idx"].append(train_idx)
                 df["Test Idx"].append(test_idx)
 
@@ -264,7 +272,7 @@ if __name__ == "__main__":
         for strategy in STRATEGIES:
             if strategy in DROPOUTS:
                 continue
-            iterations = [0, 4, 9, 19]
+            iterations = [0, 4, 9, 17]
             for i in iterations:
                 print(f"Iteration {i}/{len(iterations)} {strategy} strategy")
                 png_file = os.path.join(f"{image_folder}", f"{strategy}_it_{i}_s_{seed}.png")

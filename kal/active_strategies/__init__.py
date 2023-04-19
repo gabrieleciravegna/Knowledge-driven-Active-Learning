@@ -353,6 +353,8 @@ color_mappings = {
     'KAL': colors[9],
     'KAL_DU': colors[9],
     'KAL_DROP_DU': colors[9],
+    'KAL_XAI_DU': colors[9],
+    'KAL_XAI_DROP_DU': colors[9],
     'Margin': colors[6],
     'Margin_D': colors[6],
     'Random': colors[7],

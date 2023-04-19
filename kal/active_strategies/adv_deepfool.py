@@ -26,7 +26,7 @@ class AdversarialDeepFoolSampling(Strategy):
 
         dis = torch.zeros(x.shape[0])
         dev = next(clf.parameters()).device
-        for j in trange(x.shape[0]):
+        for j in range(x.shape[0]):
 
             x_j = x[j]
             nx = torch.unsqueeze(x_j, 0).to(dev)
