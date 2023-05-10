@@ -4,6 +4,8 @@ from typing import List, Union, Tuple, Iterable, Sized
 import numpy as np
 import torch
 from sympy import to_dnf
+import matplotlib.pyplot as plt
+import seaborn as sns
 
 from kal.knowledge import KnowledgeLoss
 from kal.utils import steep_sigmoid, inv_steep_sigmoid, epsilon
@@ -11,7 +13,7 @@ from kal.utils import steep_sigmoid, inv_steep_sigmoid, epsilon
 
 class Expl_2_Loss(KnowledgeLoss):
     def __init__(self, names: List[str], expl: List[str], mu=1, uncertainty=False,
-                 mutual_excl=False, double_imp=True, percentage=None):
+                 mutual_excl=False, double_imp=True, percentage=None, discretize_feats=False):
         super().__init__(names)
         self.expl = expl
         self.mu = mu
@@ -19,17 +21,25 @@ class Expl_2_Loss(KnowledgeLoss):
         self.mutual_excl = mutual_excl
         self.double_imp = double_imp
         self.percentage = percentage
+        self.discretize_feats = discretize_feats
 
-    def __call__(self, output, x=None, targets=False, return_argmax=False, return_losses=False) \
+    def __call__(self, output, x=None, targets=False, return_argmax=False,
+                 return_losses=False, debug=False, biased=False) \
             -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
         assert x is not None, "Must pass input data to compute " \
                               "the rule violation loss with this strategy"
         from kal.utils import replace_expl_names
 
+        single_output = False
         if len(output.shape) == 1:
+            single_output = True
             output = torch.stack([output, 1 - output], dim=1)
             # output = output.unsqueeze(dim=1)
             assert len(self.expl) == 1
+
+        if self.discretize_feats:
+            x = (x > 0.5).to(float)
+            output = (output > 0.5).to(float)
 
         # Calculating the loss associated to the explanation of each class
         loss_fol_product_tnorm = [torch.zeros(output.shape[0], device=output.device)]
@@ -59,6 +69,8 @@ class Expl_2_Loss(KnowledgeLoss):
                         if "~" in term:
                             term = term.replace("~", "")
                             neg = True
+                        if term == "True":
+                            continue
                         feat_n = int(term[term.index("feature")+7:term.index("feature")+17])
                         feat = x[:, feat_n]
                         if diseq:
@@ -77,20 +89,30 @@ class Expl_2_Loss(KnowledgeLoss):
                     # of the losses associated to each minterm a | b | c = (a | b) | c
                     or_term = or_term + term_loss - or_term * term_loss
 
+                # Computing or_term -> f = !or_term | f
+                # impl_loss_1 = 1 - ((1 - or_term) + f - (1 - or_term) * f)
+                # impl_loss_1 = 1 - (1 - or_term + or_term*f)
+                # impl_loss_1 = 1 - (1 - or_term * (1 - f))
+                impl_loss_1 = or_term * (1 - f)
+                # thr = 1e-10
+                # impl_loss_1[impl_loss_1 < thr] = 0
+                assert not targets or impl_loss_1.sum() == 0, "Error in calculating implications Class <-> Attr"
+                loss_fol_product_tnorm.append(impl_loss_1)
+
+                # if biased:
+                #     # Computing !or_term -> f = or_term | f
+                #     # impl_loss_1 = 1 - (or_term + f - (or_term) * f)
+                #     # impl_loss_1 = 1 - (or_term + f - or_term*f)
+                #     # impl_loss_1 = 1 - (or_term + f - or_term*f)
+                #     impl_loss_biased = 1 - (or_term + f - or_term*f)
+                #     loss_fol_product_tnorm.append(impl_loss_biased)
+
                 # Computing f -> or_term = !f | or_term
                 # impl_loss_1 = 1 - ((1 - f) + or_term - (1 - f) * or_term)
                 # impl_loss_1 = 1 - (1 - f - f*or_term)
                 # impl_loss_1 = 1 - (1 - f* (1 - or_term))
-                impl_loss_1 = f * (1 - or_term)
-                assert not targets or impl_loss_1.sum() == 0, "Error in calculating implications Class <-> Attr"
-                loss_fol_product_tnorm.append(impl_loss_1)
-
-                # Computing or_term -> f  = !or_term | f
-                # impl_loss_1 = 1 - ((1 - or_term) + f - (1 - or_term) * f)
-                # impl_loss_1 = 1 - (1 - or_term + or_term*f)
-                # impl_loss_1 = 1 - (1 - or_term * (1 - f))
                 if self.double_imp:
-                    impl_loss_2 = or_term * (1 - f)
+                    impl_loss_2 = f * (1 - or_term)
                     assert not targets or impl_loss_2.sum() == 0, "Error in calculating implications Attr -> Class"
                     loss_fol_product_tnorm.append(impl_loss_2)
 
@@ -105,6 +127,9 @@ class Expl_2_Loss(KnowledgeLoss):
                         excl_loss *= (1 - output[:, j])
                 mutual_excl_loss *= 1 - excl_loss
             loss_fol_product_tnorm.append(mutual_excl_loss)
+            if debug:
+                sns.scatterplot(x=x[:, 0].cpu(), y=x[:, 1].cpu(), hue=mutual_excl_loss.cpu()).set(title="mu_ex: " + expl_i)
+                plt.show()
 
         losses = torch.stack(loss_fol_product_tnorm, dim=1)
 
@@ -114,11 +139,31 @@ class Expl_2_Loss(KnowledgeLoss):
 
         if self.uncertainty:
             unc_loss = 0.
-            for i in range(output.shape[1]):
+            for i in range(output.shape[1]) if not single_output else [0]:
                 unc_loss += output[:, i] * (1 - output[:, i])
             losses = torch.cat((losses, unc_loss.unsqueeze(dim=1)), dim=1)
 
         loss_sum = torch.squeeze(torch.sum(losses, dim=1))
+
+        if debug:
+            sns.scatterplot(x=x[:, 0].cpu(), y=x[:, 1].cpu(), hue=f.cpu()).set(title="f: " + expl_i)
+            plt.axhline(0.5, 0, 1, c="k")
+            plt.axvline(0.5, 0, 1, c="k")
+            plt.show()
+            # sns.scatterplot(x=x[:, 0].cpu(), y=x[:, 1].cpu(), hue=term_loss.cpu()).set(title="term: " + expl_i)
+            # plt.show()
+            sns.scatterplot(x=x[:, 0].cpu(), y=x[:, 1].cpu(), hue=or_term.cpu()).set(title="or_term: " + expl_i)
+            plt.show()
+            sns.scatterplot(x=x[:, 0].cpu(), y=x[:, 1].cpu(), hue=impl_loss_1.cpu()).set(title="impl1: " + expl_i)
+            plt.show()
+            sns.scatterplot(x=x[:, 0].cpu(), y=x[:, 1].cpu(), hue=impl_loss_2.cpu()).set(title="impl2: " + expl_i)
+            plt.show()
+            sns.scatterplot(x=x[:, 0].cpu(), y=x[:, 1].cpu(), hue=unc_loss.cpu()).set(title="f | !f")
+            plt.show()
+            sns.scatterplot(x=x[:, 0].cpu(), y=x[:, 1].cpu(), hue=loss_sum.cpu()).set(title="loss sum")
+            plt.axhline(0.5, 0, 1, c="k")
+            plt.axvline(0.5, 0, 1, c="k")
+            plt.show()
 
         threshold = 0.5 if targets else 10.
         self.check_loss(output, losses.T, loss_sum, threshold)

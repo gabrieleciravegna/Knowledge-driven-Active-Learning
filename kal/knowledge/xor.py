@@ -38,7 +38,7 @@ class XORLoss(KnowledgeLoss):
     # => 1 - ((1 - (x1 * (1 - x2)) * (1 - (x2 * (1 - x1)) * (1 - f)
 
     def __call__(self, output: torch.Tensor, x: torch.Tensor = None, return_argmax=False,
-                 return_losses=False) \
+                 return_losses=False, debug=False) \
             -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
         assert x is not None, "Must pass input data to compute " \
                               "the rule violation loss on this dataset"
@@ -60,6 +60,18 @@ class XORLoss(KnowledgeLoss):
         cons_loss2 = (1 - ((1 - (x1 * (1 - x2))) * (1 - (x2 * (1 - x1))))) * (1 - output)
         cons_loss3 = output * (1 - output)
         c_losses = [cons_loss1, cons_loss2]
+
+        if debug:
+            import matplotlib.pyplot as plt
+            import seaborn as sns
+            sns.scatterplot(x=x[:, 0].cpu(), y=x[:, 1].cpu(), hue=output.cpu()).set(title="f")
+            plt.show()
+            sns.scatterplot(x=x[:, 0].cpu(), y=x[:, 1].cpu(), hue=cons_loss1.cpu()).set(title="x0 & !x1 | x1 & !x0 -> f")
+            plt.show()
+            sns.scatterplot(x=x[:, 0].cpu(), y=x[:, 1].cpu(), hue=cons_loss2.cpu()).set(title="f -> x0 & !x1 | x1 & !x0")
+            plt.show()
+            sns.scatterplot(x=x[:, 0].cpu(), y=x[:, 1].cpu(), hue=cons_loss3.cpu()).set(title="f | !f")
+            plt.show()
 
         if self.percentage is not None:
             n_rules = round(len(c_losses) * self.percentage // 100)

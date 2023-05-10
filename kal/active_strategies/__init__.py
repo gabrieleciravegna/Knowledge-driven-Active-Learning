@@ -5,7 +5,9 @@ import seaborn as sns
 from kal.active_strategies.adv_bim import AdversarialBIMSampling
 from kal.active_strategies.adv_deepfool import AdversarialDeepFoolSampling
 from kal.active_strategies.entropy import EntropySampling, EntropyDropoutSampling
-from kal.active_strategies.kal_xai import KALXAIDiversityUncSampling, KALXAIDropDiversityUncSampling
+from kal.active_strategies.kal_debias import KALDEBIASDiversityUncSampling, KALDEBIASSampling
+from kal.active_strategies.kal_xai import KALXAIDiversityUncSampling, KALXAIDropDiversityUncSampling, KALXAISampling, \
+    KALXAIDiversitySampling
 from kal.active_strategies.kal_plus import KALPlusSampling, KALPlusSamplingSVM, KALPlusSamplingTree, KALPlusSamplingLOF, \
     KALPlusUncDiversitySampling, KALPlusDiversitySampling, KALPlusUncSampling, KALPlusDropSampling, \
     KALPlusDropUncSampling, KALPlusDropDiversitySampling, KALPlusDropDiversityUncSampling
@@ -61,6 +63,10 @@ KAL_XAI_DROP = "KAL_XAI_DROP"
 KAL_XAI_DROP_D = "KAL_XAI_DROP_D"
 KAL_XAI_DROP_U = "KAL_XAI_DROP_U"
 KAL_XAI_DROP_DU = "KAL_XAI_DROP_DU"
+
+KAL_DEBIAS = "KAL_DEBIAS"
+KAL_DEBIAS_DU = "KAL_DEBIAS_DU"
+
 UNCERTAINTY = "Uncertainty"
 UNCERTAINTY_D = "Uncertainty_D"
 MARGIN = "Margin"
@@ -221,8 +227,11 @@ SAMPLING_STRATEGIES: Dict[str, Callable[..., Strategy]] = {
     KAL_DROP_DU: KALDropDiversityUncSampling,
     KAL_STAR_DU: KALDiversityUncSampling,
     KAL_STAR_DROP_DU: KALDropDiversityUncSampling,
+    KAL_XAI: KALXAISampling,
     KAL_XAI_DU: KALXAIDiversityUncSampling,
     KAL_XAI_DROP_DU: KALXAIDropDiversityUncSampling,
+    KAL_DEBIAS: KALDEBIASSampling,
+    KAL_DEBIAS_DU: KALDEBIASDiversityUncSampling,
     KAL_PLUS: KALPlusSampling,
     KAL_PLUS_U: KALPlusUncSampling,
     KAL_PLUS_D: KALPlusDiversitySampling,
@@ -259,6 +268,16 @@ SAMPLING_STRATEGIES: Dict[str, Callable[..., Strategy]] = {
     KAL_XAI_DU_50: KALXAIDiversityUncSampling,
     KAL_XAI_DU_75: KALXAIDiversityUncSampling
 }
+KAL_BIASES = [
+    KAL_DEBIAS,
+    KAL_DEBIAS_DU,
+    KAL_XAI_DU,
+    RANDOM,
+    # UNCERTAINTY,
+    # ENTROPY,
+    # KCENTER
+]
+
 
 NAME_MAPPINGS_ABLATION_STUDY = {
     KAL: "KAL",
@@ -300,8 +319,11 @@ NAME_MAPPINGS = {
     KAL_PLUS_DROP_DU: "KAL$_D^+$",
     KAL_STAR_DU: "KAL$^*$",
     KAL_STAR_DROP_DU: "KAL$_D^*$",
+    KAL_XAI: "KAL$_{XAI}$",
     KAL_XAI_DU: "KAL$_{XAI}$",
     KAL_XAI_DROP_DU: "KAL$_{XAI D}$",
+    KAL_DEBIAS: "KAL$_{DEBIAS}$",
+    KAL_DEBIAS_DU: "KAL$_{DEBIAS}$",
     UNCERTAINTY: "LeastConf",
     UNCERTAINTY_D: "LeastConf"+"$_D$",
     MARGIN: MARGIN,
@@ -355,6 +377,7 @@ color_mappings = {
     'KAL_DROP_DU': colors[9],
     'KAL_XAI_DU': colors[9],
     'KAL_XAI_DROP_DU': colors[9],
+    'KAL_DEBIAS_DU': [color + 0.15 for color in colors[9]],
     'Margin': colors[6],
     'Margin_D': colors[6],
     'Random': colors[7],

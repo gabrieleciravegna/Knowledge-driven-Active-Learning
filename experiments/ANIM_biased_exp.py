@@ -30,7 +30,8 @@ import tqdm
 from torch.utils.data import TensorDataset
 
 from kal.active_strategies import STRATEGIES, SAMPLING_STRATEGIES, ENTROPY_D, ENTROPY, ADV_DEEPFOOL, ADV_BIM, BALD, \
-    DROPOUTS, KAL_DEBIAS, KAL_DEBIAS_DU, KAL, KAL_XAI, RANDOM, UNCERTAINTY, RandomSampling, KAL_DU
+    DROPOUTS, KAL_XAI_AVOID_FOUND_BIAS, \
+    KAL_XAI_AVOID_KNOWN_BIAS, KAL, KAL_XAI, RANDOM, UNCERTAINTY, RandomSampling
 from kal.knowledge.xor import XORLoss, steep_sigmoid
 from kal.metrics import F1
 from kal.network import MLP, train_loop, evaluate, predict_dropout
@@ -58,8 +59,9 @@ now = str(datetime.datetime.now()).replace(":", ".")
 dev = torch.device("cpu")
 print(f"Working on {dev}")
 
-strategies = [KAL_DU, KAL_DEBIAS, KAL_DEBIAS_DU, RANDOM, UNCERTAINTY]
-# strategies = [ KAL_DEBIAS_DU]
+# strategies = STRATEGIES
+strategies = [KAL, KAL_XAI_AVOID_KNOWN_BIAS, KAL_XAI_AVOID_FOUND_BIAS, KAL_XAI, RANDOM, UNCERTAINTY]
+strategies = [RANDOM, UNCERTAINTY]
 
 # %% md
 #### Generating and visualizing data for the xor problem
@@ -71,7 +73,7 @@ tot_points = 100000
 first_points = 100
 n_points = 5
 rand_points = 0
-n_iterations = (200 - first_points) // n_points
+n_iterations = (150 - first_points) // n_points
 input_size = 2
 hidden_size = 200
 seeds = 10
@@ -80,16 +82,17 @@ epochs = 250
 discretize_feats = True
 height = None
 feature_names = ["x0", "x1"]
+# bias = "x1 & ~x0"
 bias = "x1"
 xai_model = XAI_TREE(discretize_feats=discretize_feats,
                      height=height, class_names=feature_names, dev=dev)
 c_loss = Expl_2_Loss(feature_names, expl=[bias], uncertainty=False, double_imp=True)
+print(f"Number of random points: {rand_points}")
 
-### CREATING A BIASED TRAIN DATASET: X1
 # The train dataset is composed of 19/20 of biased data (falling in the left quadrants)
 # and only 1/20 of regular data
 x_train_reg = torch.rand(tot_points//20, input_size).to(dev)
-x_train_biased = torch.rand(tot_points, input_size)
+x_train_biased = torch.rand(tot_points//20*19, input_size)
 x_train_biased[:, 0] = x_train_biased[:, 0]/2
 x_train = torch.cat((x_train_reg, x_train_biased), dim=0)
 y_train = (((x_train[:, 0] > 0.5) & (x_train[:, 1] < 0.5)) |
@@ -101,6 +104,23 @@ y_test = (((x_test[:, 0] > 0.5) & (x_test[:, 1] < 0.5)) |
           ((x_test[:, 1] > 0.5) & (x_test[:, 0] < 0.5))
           ).float().to(dev)
 n_classes = 1
+
+# %% md
+#### Defining constraints as product t-norm of the FOL rule expressing the XOR
+# %%
+# preds = MLP(1, 2, 100)(x_t).detach().squeeze()
+#
+# k_loss = KLoss()(y_t, x=x_t)
+# sns.scatterplot(x=x_t[:, 0].numpy(), y=x_t[:, 1].numpy(), hue=k_loss.numpy())
+# plt.show()
+#
+# k_loss = KLoss(uncertainty=True)(preds, x=x_t)
+# sns.scatterplot(x=x_t[:, 0].numpy(), y=x_t[:, 1].numpy(), hue=k_loss.numpy())
+# plt.show()
+#
+# s_loss = torch.nn.BCELoss(reduction="none")(preds, y_t)
+# sns.scatterplot(x=x_t[:, 0].numpy(), y=x_t[:, 1].numpy(), hue=s_loss.numpy())
+# plt.show()
 
 # %%md
 #### Calculating the prediction of the rule
@@ -119,28 +139,47 @@ print("Rule Accuracy:", f1_score(y_test.cpu(), pred_rule.cpu() > 0.5) * 100)
 # %%
 
 dfs = []
+# skf = StratifiedKFold(n_splits=seeds)
+### CREATING A BIASED DATASET AT FIRST: X1
+# first_idx = np.random.choice(train_sample, first_points, replace=False).tolist()
+# idx_quad_12 = torch.argwhere(x_t[:, 0] < 0.5)
+# idx_quad_12 = idx_quad_12[torch.randperm(idx_quad_12.shape[0])]
+# first_idx = idx_quad_12[:first_points].squeeze().cpu().numpy().tolist()
+# # idx_quad_34 = torch.argwhere(x_train[:, 0] > 0.5)
+# # idx_quad_34 = idx_quad_34[torch.randperm(idx_quad_34.shape[0])]
+# # first_idx.extend(idx_quad_34[:first_points//50].squeeze().cpu().numpy().tolist())
+# print("First idx", first_idx)
+# n_classes = 1
+#
+# x_train, y_train = x_t[train_idx], y_t[train_idx].unsqueeze(dim=1)
+# x_test, y_test = x_t[test_idx], y_t[test_idx].unsqueeze(dim=1)
 train_dataset = TensorDataset(x_train, y_train)
 test_dataset = TensorDataset(x_test, y_test)
 train_sample = len(train_dataset)
 
-bias_measure_train = 1 - c_loss(y_train, x_train)
-bias_measure_test = 1 - c_loss(y_test, x_test)
-print(f"Mean Bias in the training data: {bias_measure_train.mean():.2f}, test {bias_measure_test.mean():.2f}")
-
-sns.scatterplot(x=x_train[:, 0].cpu(), y=x_train[:, 1].cpu(), hue=y_train.cpu(), legend=True).set_title("Noisy Labelling")
-plt.show()
-
-sns.scatterplot(x=x_train[:, 0].cpu(), y=x_train[:, 1].cpu(), hue=1 - bias_measure_train.cpu(), legend=True).set_title(f"Bias {bias} level")
-plt.show()
+bias_loss = 1 - c_loss(y_train, (x_train > 0.5).to(float))
+bias_loss_tot = 1 - c_loss(y_train, x_train)
+# assert bias_measure.sum() == 0, "Error in selecting the first index, they do not match the bias"
+print(f"Mean Bias in the first training data: {bias_loss.mean():.2f}, totally {bias_loss_tot.mean():.2f}")
+# sns.set_palette(sns.color_palette()[:3])
+# sns.scatterplot(x=x_train[:, 0].cpu(), y=x_train[:, 1].cpu(), hue=1 - bias_loss_tot.cpu(), legend=True)
+# new_idx = [0 for idx in range(len(first_idx))]
+# sns.scatterplot(x=x_train[np.asarray(first_idx), 0].cpu(), y=x_train[np.asarray(first_idx), 1].cpu(),
+#                 hue=new_idx, size=new_idx, sizes=[70], legend=False)
+# plt.show()
 
 # for seed, (train_idx, test_idx) in enumerate(skf.split(x_t.cpu(), y_t.cpu())):
 for seed in range(seeds):
 
-    # if seed >= 5:
-    #     break
+    if seed >= 5:
+        break
     set_seed(seed)
 
     first_idx = RandomSampling().selection(torch.ones_like(y_train), [], first_points)[0]
+    # sns.scatterplot(x=x_train[:, 0].cpu().numpy(), y=x_train[:, 1].cpu().numpy(), hue=y_train.squeeze().cpu().numpy())
+    # plt.scatter(x=x_train[first_idx, 0].cpu().numpy(), y=x_train[first_idx, 1].cpu().numpy(), c="red")
+    # plt.savefig(f"{image_folder}\\data_labelling.png")
+    # plt.show()
 
     for strategy in strategies:
         active_strategy = SAMPLING_STRATEGIES[strategy](k_loss=KLoss,
@@ -164,7 +203,24 @@ for seed in range(seeds):
             print(f"Already trained {df_file}, auc: {auc:.2f}, bias: {b_l:.2f}, biased (%): {b_m:.2f}")
             continue
 
-        df = []
+        df = {
+            "Strategy": [],
+            "Seed": [],
+            "Iteration": [],
+            "Active Idx": [],
+            "Used Idx": [],
+            "Predictions": [],
+            "Train Accuracy": [],
+            "Test Accuracy": [],
+            "Supervision Loss": [],
+            "Bias Measure": [],
+            "Biased Model": [],
+            "Active Loss": [],
+            "Time": [],
+            # "Train Idx": [],
+            # "Test Idx": []
+        }
+
         loss = torch.nn.BCEWithLogitsLoss(reduction="none")
         metric = F1()
 
@@ -175,114 +231,135 @@ for seed in range(seeds):
         losses = []
         used_idx = first_idx.copy()
         for it in (pbar := tqdm.trange(n_iterations)):
+
             losses += train_loop(net, train_dataset, used_idx, epochs,
                                  lr=lr, loss=loss)
+            t = time.time()
             train_accuracy, _, preds_train = evaluate(net, train_dataset, loss=loss, device=dev,
-                                                      return_preds=True, labelled_idx=used_idx)
+                                                  return_preds=True, labelled_idx=used_idx)
+            pred_time = time.time() - t
+            # print(f"Pred time {pred_t:2f}")
             if strategy in DROPOUTS:
+                t = time.time()
                 preds_dropout = predict_dropout(net, train_dataset)
                 assert (preds_dropout - preds_train).abs().sum() > .1, \
                     "Error in computing dropout predictions"
+                pred_time = time.time() - t
+                # print(f"Dropout time {pred_t:2f}")
             else:
                 preds_dropout = None
 
             test_accuracy, sup_loss, preds_test = evaluate(net, test_dataset, metric=metric,
                                                            device=dev, return_preds=True,
-                                                           loss=loss)
-            bias_loss = c_loss(preds_train, x_train)
-            bias_measure = 1 - c_loss(preds_test, x_test).mean().item()
-            bias_measure = ((bias_measure - bias_measure_test.mean()) /
-                            (bias_measure_train.mean() - bias_measure_test.mean())).item()  # Normalized
+                                                           loss=torch.nn.BCEWithLogitsLoss(reduction="none"))
+            bias_measure = 1 - c_loss(preds_test, x_test.to(float), debug=False).mean().item()
             expl_formulas = xai_model.explain(x_test, preds_test, range(len(y_test)))
             biased_model = int(check_bias_in_exp(expl_formulas[0], bias))
             print(expl_formulas)
-            print(f"Bias in dataset: {1 - c_loss(y_train[used_idx], x_train[used_idx]).mean():.2f}")
 
             t = time.time()
 
+            if strategy == KAL_XAI_AVOID_KNOWN_BIAS:
+                bias_strategy = True
+                # formulas = ["x1"]
+                formulas = [bias]
+                # formulas = [str(sympy.simplify_logic(f"~(x1 & ~x0)"))]
+            elif strategy == KAL_XAI_AVOID_FOUND_BIAS:
+                if biased_model:
+                    formulas = [bias]
+                    bias_strategy = True
+                    # formulas = [str(sympy.simplify_logic(f"~({expl_formulas[0]})"))]
+                    # active_strategy.rand_points = 0
+                else:
+                    bias_strategy = False
+                    # formulas = expl_formulas
+                    formulas = [str(sympy.simplify_logic(f"({expl_formulas[0]})"))]
+                    # active_strategy.rand_points = n_points
+            else:
+                formulas = None
+                bias_strategy = False
             active_idx, active_loss = active_strategy.selection(preds_train, used_idx,
                                                                 n_points, x=x_train,
                                                                 labels=y_train.squeeze(),
-                                                                formulas=expl_formulas,
-                                                                bias=bias,
-                                                                biased_model=biased_model,
+                                                                formulas=formulas,
+                                                                bias_strategy=bias_strategy,
                                                                 preds_dropout=preds_dropout,
                                                                 clf=net, dataset=train_dataset)
             used_time = time.time() - t
+
             used_idx += active_idx
 
-            df.append({
-                "Strategy": strategy,
-                "Seed": seed,
-                "Iteration": it,
-                "Active Idx": active_idx.copy(),
-                "Used Idx": used_idx.copy(),
-                "Predictions": preds_train.cpu().numpy(),
-                'Train Accuracy': train_accuracy,
-                "Test Accuracy": test_accuracy,
-                "Supervision Loss": sup_loss,
-                "Bias Measure": bias_measure,
-                "Biased Model": biased_model,
-                "Bias Loss": bias_loss.cpu().numpy(),
-                "Active Loss": active_loss.cpu().numpy(),
-                "Time": used_time,
-            })
+            df["Strategy"].append(strategy)
+            df["Seed"].append(seed)
+            df["Iteration"].append(it)
+            df["Active Idx"].append(active_idx.copy())
+            df["Used Idx"].append(used_idx.copy())
+            df["Predictions"].append(preds_train.cpu().numpy())
+            df['Train Accuracy'].append(train_accuracy)
+            df["Test Accuracy"].append(test_accuracy)
+            df["Supervision Loss"].append(sup_loss)
+            df["Bias Measure"].append(bias_measure)
+            df["Biased Model"].append(biased_model)
+            df["Active Loss"].append(active_loss.cpu().numpy())
+            df["Time"].append(used_time)
+            # df["Train Idx"].append(train_idx)
+            # df["Test Idx"].append(test_idx)
 
             assert isinstance(used_idx, list), "Error"
 
             pbar.set_description(f"{strategy} {seed + 1}/{seeds}, "
-                                 f"train acc: {train_accuracy:.2f}, "
-                                 f"test acc: {test_accuracy:.2f}, "
-                                 f"biased: {biased_model}, "
-                                 f"bias: {bias_measure:.2f}, "
+                                 f"train acc: {df['Train Accuracy'][-1]:.2f}, "
+                                 f"test acc: {df['Test Accuracy'][-1]:.2f}, "
+                                 # f"a_l: {active_loss[-1]:.2f}, "
+                                 # f"s_l: {losses[-1]:.2f}, "
+                                 f"biased: {df['Biased Model'][-1]}, "
+                                 f"bias: {df['Bias Measure'][-1]:.2f}, "
                                  f"p: {len(used_idx)}")
 
-            if (it == 0 or it == n_iterations - 1) and seed == 0:
-                visualize_data_predictions(x_train, it, strategy, pd.DataFrame(df), None,
-                                           seed=seed)
-                visualize_data_predictions(x_train, it, strategy, pd.DataFrame(df), None,
-                                           seed=seed, bias=True)
-                sns.scatterplot(x=x_train[used_idx, 0], y=x_train[used_idx, 1], hue=y_train[used_idx])
-                plt.show()
+            visualize_data_predictions(x_train, it, strategy, pd.DataFrame(df), None,
+                                       seed=seed)
+            visualize_data_predictions(x_train, it, strategy, pd.DataFrame(df), None,
+                                       seed=seed, active_loss=True)
 
-        if seed == 0:
-            sns.lineplot(data=losses)
-            plt.yscale("log")
-            plt.ylabel("Loss")
-            plt.xlabel("Epochs")
-            plt.title(f"Training loss variations for {strategy} "
-                      f"active learning strategy")
-            plt.show()
+        # if seed == 0:
+        #     sns.lineplot(data=losses)
+        #     plt.yscale("log")
+        #     plt.ylabel("Loss")
+        #     plt.xlabel("Epochs")
+        #     plt.title(f"Training loss variations for {strategy} "
+        #               f"active learning strategy")
+        #     plt.show()
 
-        df = pd.DataFrame.from_dict(df)
+        df = pd.DataFrame(df)
         df.to_pickle(df_file)
         dfs.append(df)
+
+        # sns.lineplot(data=df, x="Iteration", y="Bias Measure")
+        # plt.title(f"Bias measure for {strategy} strategy")
+        # plt.show()
+        #
+        # sns.lineplot(data=df, x="Iteration", y="Biased Model")
+        # plt.title(f"Biased Models in iterations for {strategy} strategy")
+        # plt.show()
 
 dfs = pd.concat(dfs).reset_index()
 # dfs.to_pickle(f"{result_folder}\\metrics_{n_points}_points_{now}.pkl")
 dfs.to_pickle(f"{result_folder}\\results.pkl")
 
-
-dfs['# points'] = dfs['Iteration']*n_points + first_points
 mean_auc = dfs.groupby("Strategy").mean().round(2)['Test Accuracy']
 std_auc = dfs.groupby(["Strategy", "Seed"]).mean().groupby("Strategy").std().round(2)['Test Accuracy']
 print("AUC", mean_auc, "+-", std_auc)
 
-sns.lineplot(data=dfs, x='# points', y="Test Accuracy", hue="Strategy")
-# plt.gca().invert_yaxis()
+sns.lineplot(data=dfs, x="Iteration", y="Test Accuracy", hue="Strategy")
 plt.title(f"Test Accuracy in iterations among different strategies")
-plt.savefig(os.path.join(image_folder, f"Test Accuracy {strategies}"))
 plt.show()
 
-dfs['Bias Measure'] = dfs['Bias Measure'].apply(lambda x: x.item() if isinstance(x, torch.Tensor) else x)
-sns.lineplot(data=dfs, x='# points', y="Bias Measure", hue="Strategy")
+sns.lineplot(data=dfs, x="Iteration", y="Bias Measure", hue="Strategy")
 plt.title(f"Bias measure among different strategies")
-plt.savefig(os.path.join(image_folder, f"Bias Measure {strategies}"))
 plt.show()
 
-sns.lineplot(data=dfs, x='# points', y="Biased Model", hue="Strategy")
+sns.lineplot(data=dfs, x="Iteration", y="Biased Model", hue="Strategy")
 plt.title(f"Biased Models in iterations among different strategies")
-plt.savefig(os.path.join(image_folder, f"Biased Model {strategies}"))
 plt.show()
 # %% md
 

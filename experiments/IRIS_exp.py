@@ -153,7 +153,7 @@ if __name__ == "__main__":
                                                             hidden_size=hidden_size,
                                                             dev=dev, cv=False,
                                                             class_names=feat_names,
-                                                            mutual_excl=True, double_imp=True,
+                                                            mutual_excl=False, double_imp=True,
                                                             discretize_feats=discretize_feats)
             df_file = os.path.join(result_folder, f"metrics_{n_points}_points_"
                                                   f"{seed}_seed_{strategy}_strategy.pkl")

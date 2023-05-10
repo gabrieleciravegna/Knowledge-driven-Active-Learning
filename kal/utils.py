@@ -11,13 +11,15 @@ import random
 # from kal.knowledge import KnowledgeLoss
 # from kal.network import MLP
 from sklearn.tree import _tree, DecisionTreeClassifier
+from sympy import to_dnf, simplify_logic, true
 
 epsilon = 1e-10
 
 
 def visualize_data_predictions(x_t: torch.Tensor, itr: int, act_strategy: str,
                                dataframe: pd.DataFrame, png_file: str = None,
-                               dimensions=None, seed=0, dataset="xor"):
+                               dimensions=None, seed=0, dataset="xor",
+                               active_loss=False, bias=False):
     from kal.active_strategies import NAME_MAPPINGS
     if dimensions is None:
         dimensions = [0, 1]
@@ -27,14 +29,12 @@ def visualize_data_predictions(x_t: torch.Tensor, itr: int, act_strategy: str,
 
     a_idx = df_iteration["Active Idx"].item()
     u_idx = df_iteration["Used Idx"].item()
+    # train_idx = df_iteration["Train Idx"].item()
     n_points = len(u_idx)
     assert n_points == len(np.unique(u_idx)), f"Error in selecting points {u_idx}"
 
-    train_idx = df_iteration["Train Idx"].item()
-    acc = df_iteration['Test Accuracy'].item()
-
-    x_0, x_1 = x_t.cpu().numpy()[train_idx, dimensions[0]], \
-               x_t.cpu().numpy()[train_idx, dimensions[1]]
+    x_0, x_1 = x_t.cpu().numpy()[:, dimensions[0]], \
+               x_t.cpu().numpy()[:, dimensions[1]]
     preds = df_iteration["Predictions"].item()
 
     # multi_class = False
@@ -42,11 +42,21 @@ def visualize_data_predictions(x_t: torch.Tensor, itr: int, act_strategy: str,
         if len(preds.shape) > 1:
             preds = preds[:, 1]
         new_idx = [1 if idx in a_idx else 0 for idx in u_idx]
-        sns.scatterplot(x=x_0, y=x_1, hue=preds, legend=False)
-        sns.scatterplot(x=x_0[np.asarray(u_idx)], y=x_1[np.asarray(u_idx)],
-                        hue=new_idx, size=new_idx, sizes=[70, 100], legend=False)
-        plt.xlabel("$x_1$")
-        plt.ylabel("$x_2$")
+        if active_loss:
+            a_loss = df_iteration["Active Loss"].item()
+            sns.scatterplot(x=x_0, y=x_1, hue=a_loss, legend=True)
+        elif bias:
+            bias_measure = df_iteration["Bias Loss"].item()
+            bias_measure[bias_measure < 1e-10] = 0
+            sns.scatterplot(x=x_0, y=x_1, hue=bias_measure, legend=True)
+        else:
+            sns.scatterplot(x=x_0, y=x_1, hue=preds, legend=True)
+            sns.scatterplot(x=x_0[np.asarray(u_idx)], y=x_1[np.asarray(u_idx)],
+                            hue=new_idx, size=new_idx, sizes=[70, 100], legend=False)
+        plt.axhline(0.5, 0, 1, c="k")
+        plt.axvline(0.5, 0, 1, c="k")
+        plt.xlabel("$x_0$")
+        plt.ylabel("$x_1$")
     else:
         preds = np.argmax(preds, axis=1)
         new_idx = [1 if idx in a_idx else 0 for idx in u_idx]
@@ -61,12 +71,10 @@ def visualize_data_predictions(x_t: torch.Tensor, itr: int, act_strategy: str,
         plt.xlabel("$Petal Length$")
         plt.ylabel("$Petal Width$")
 
-    plt.axhline(0.5, 0, 1, c="k")
-    plt.axvline(0.5, 0, 1, c="k")
     # plt.title(f"Points selected by {act_strategy}, iter {itr}, "
     #           f"acc {acc:.2f}, n_points{n_points}")
-    plt.title(f"{NAME_MAPPINGS[act_strategy]} ")
-              # f"- {n_points} p - {acc:.2f} %", fontsize=28)
+    plt.title(f"{NAME_MAPPINGS[act_strategy]} - it {itr} - seed {seed} ")
+    # f"- {n_points} p - {acc:.2f} %", fontsize=28)
     plt.xticks([0.0, 0.5, 1.0])
     plt.yticks([0.0, 0.5, 1.0])
     sns.despine(left=True, bottom=True)
@@ -74,7 +82,6 @@ def visualize_data_predictions(x_t: torch.Tensor, itr: int, act_strategy: str,
     if png_file is not None:
         plt.savefig(png_file)
     plt.show()
-
 
 def visualize_active_vs_sup_loss(i, active_strategy, dataframe, png_file: str = None,
                                  lin_regression=False):
@@ -201,7 +208,7 @@ def replace_expl_names(explanation: str, concept_names: List[str]) -> str:
 
 
 def tree_to_formula(tree: DecisionTreeClassifier, concept_names: List[str], target_class: int,
-                    skip_negation=False) -> str:
+                    skip_negation=False, discretize_feats=False, simplify=True) -> str:
     """
     Translate a decision tree into a set of decision rules.
 
@@ -232,14 +239,14 @@ def tree_to_formula(tree: DecisionTreeClassifier, concept_names: List[str], targ
             name = feature_name[node]
             threshold = tree_.threshold[node]
             # assert threshold == 0.5, f"Error in threshold {threshold}"
-            s = f'{name} <= {threshold}'
+            s = f'{name} <= {threshold}' if not discretize_feats else f'~{name}'
             if node == 0:
                 pathto[node] = s
             else:
                 pathto[node] = pathto[parent] + ' & ' + s
             recurse(tree_.children_left[node], depth + 1, node)
 
-            s = f'{name} > {threshold}'
+            s = f'{name} > {threshold}' if not discretize_feats else f'{name}'
             if node == 0:
                 pathto[node] = s
             else:
@@ -272,7 +279,25 @@ def tree_to_formula(tree: DecisionTreeClassifier, concept_names: List[str], targ
             else:
                 new_expl = new_expl[:-3] + ") | "
         explanation = new_expl[:-3]
+    if simplify and explanation != "" and discretize_feats:
+        explanation = simplify_logic(explanation, force=True)
+        explanation = str(explanation)
+
     return explanation
+
+
+def check_bias_in_exp(formula, bias):
+    # dnf_formula = str(to_dnf(formula, simplify=True, force=True))
+    # if len(dnf_formula.split(" | ")) != len(bias.split(" | ")) == 1:
+    #     return False
+    # if simplify_logic(f"(({formula}) & ({bias})) | "
+    #                   f"((~{bias}) & ~({formula}))"):
+    if formula == "True":
+        return True
+    if simplify_logic(formula) == simplify_logic(bias):
+        return True
+
+    return False
 
 
 def inv_steep_sigmoid(x: torch.Tensor, k=100, b=0.5) -> torch.Tensor:

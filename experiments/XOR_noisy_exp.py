@@ -6,6 +6,7 @@
 # Knowledge-Driven Active Learning - Experiment on the XOR problem
 
 # %% md
+import math
 import os
 
 import sympy
@@ -39,7 +40,7 @@ from kal.utils import visualize_data_predictions, set_seed, check_bias_in_exp
 plt.rc('animation', html='jshtml')
 plt.close('all')
 
-dataset_name = "xor_biased"
+dataset_name = "xor_noisy"
 model_folder = os.path.join("models", dataset_name)
 result_folder = os.path.join("results", dataset_name)
 image_folder = os.path.join("images", dataset_name)
@@ -59,7 +60,7 @@ dev = torch.device("cpu")
 print(f"Working on {dev}")
 
 strategies = [KAL_DU, KAL_DEBIAS, KAL_DEBIAS_DU, RANDOM, UNCERTAINTY]
-# strategies = [ KAL_DEBIAS_DU]
+# strategies = [KAL_DEBIAS_DU, KAL_DEBIAS]
 
 # %% md
 #### Generating and visualizing data for the xor problem
@@ -71,6 +72,7 @@ tot_points = 100000
 first_points = 100
 n_points = 5
 rand_points = 0
+noisy_percentage = 0.9
 n_iterations = (200 - first_points) // n_points
 input_size = 2
 hidden_size = 200
@@ -80,27 +82,32 @@ epochs = 250
 discretize_feats = True
 height = None
 feature_names = ["x0", "x1"]
-bias = "x1"
-xai_model = XAI_TREE(discretize_feats=discretize_feats,
+bias = "x1 & ~x0"
+xai_model = XAI_TREE(discretize_feats=True,
                      height=height, class_names=feature_names, dev=dev)
-c_loss = Expl_2_Loss(feature_names, expl=[bias], uncertainty=False, double_imp=True)
+c_loss = Expl_2_Loss(feature_names, expl=[bias], uncertainty=False, double_imp=True, discretize_feats=discretize_feats)
 
-### CREATING A BIASED TRAIN DATASET: X1
-# The train dataset is composed of 19/20 of biased data (falling in the left quadrants)
-# and only 1/20 of regular data
-x_train_reg = torch.rand(tot_points//20, input_size).to(dev)
-x_train_biased = torch.rand(tot_points, input_size)
-x_train_biased[:, 0] = x_train_biased[:, 0]/2
-x_train = torch.cat((x_train_reg, x_train_biased), dim=0)
+### CREATING A NOISY TRAIN DATASET: X1
+# The train dataset is composed of 90% of noisy data
+# and only of 10% of regular data
+x_train = torch.rand(tot_points, input_size).to(dev)
 y_train = (((x_train[:, 0] > 0.5) & (x_train[:, 1] < 0.5)) |
-       ((x_train[:, 1] > 0.5) & (x_train[:, 0] < 0.5))
-       ).float().to(dev)
+           ((x_train[:, 1] > 0.5) & (x_train[:, 0] < 0.5))
+           ).float().to(dev)
+
+right_top_idx = torch.where((x_train[:, 0] > 0.5) & (x_train[:, 1] < 0.5))[0]
+noisy_labels_num = int(len(right_top_idx)*(noisy_percentage))
+noisy_y_idx = np.random.choice(right_top_idx, noisy_labels_num, replace=False)
+y_train[noisy_y_idx] = 0
+assert y_train[right_top_idx].sum() == math.ceil(len(right_top_idx)*(1 - noisy_percentage))
+print(f"Noisy labels: {noisy_labels_num}. Clean labels: {y_train[right_top_idx].sum()}")
 
 x_test = torch.rand(tot_points//10, input_size).to(dev)
 y_test = (((x_test[:, 0] > 0.5) & (x_test[:, 1] < 0.5)) |
           ((x_test[:, 1] > 0.5) & (x_test[:, 0] < 0.5))
           ).float().to(dev)
 n_classes = 1
+
 
 # %%md
 #### Calculating the prediction of the rule
@@ -130,7 +137,7 @@ print(f"Mean Bias in the training data: {bias_measure_train.mean():.2f}, test {b
 sns.scatterplot(x=x_train[:, 0].cpu(), y=x_train[:, 1].cpu(), hue=y_train.cpu(), legend=True).set_title("Noisy Labelling")
 plt.show()
 
-sns.scatterplot(x=x_train[:, 0].cpu(), y=x_train[:, 1].cpu(), hue=1 - bias_measure_train.cpu(), legend=True).set_title(f"Bias {bias} level")
+sns.scatterplot(x=x_train[:, 0].cpu(), y=x_train[:, 1].cpu(), hue=bias_measure_train.cpu(), legend=True).set_title(f"Bias {bias} level")
 plt.show()
 
 # for seed, (train_idx, test_idx) in enumerate(skf.split(x_t.cpu(), y_t.cpu())):
@@ -261,7 +268,6 @@ for seed in range(seeds):
 dfs = pd.concat(dfs).reset_index()
 # dfs.to_pickle(f"{result_folder}\\metrics_{n_points}_points_{now}.pkl")
 dfs.to_pickle(f"{result_folder}\\results.pkl")
-
 
 dfs['# points'] = dfs['Iteration']*n_points + first_points
 mean_auc = dfs.groupby("Strategy").mean().round(2)['Test Accuracy']

@@ -23,7 +23,7 @@ orig_attribute_class_file = "class_attribute_labels_continuous.txt"
 image_file = "images.txt"
 image_folder = "images"
 target_file = "targets.npy"
-class_name_file = "class_names.txt"
+class_name_file = "feature_names.txt"
 main_classes = 200
 
 
@@ -153,8 +153,8 @@ class CUBDataset(Dataset):
         self.imgs = {i: None for i in range(len(self))}
 
         # with open(os.path.join(root, class_name_file), "r") as f:
-        #     class_names = f.read().splitlines()
-        #     self.class_names = class_names
+        #     feature_names = f.read().splitlines()
+        #     self.feature_names = feature_names
         self.class_names = classes
 
     def __getitem__(self, index: int) -> [torch.Tensor, torch.Tensor]:

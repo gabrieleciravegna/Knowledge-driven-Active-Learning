@@ -27,7 +27,7 @@ if __name__ == "__main__":
     from torch.utils.data import TensorDataset
 
     from kal.active_strategies import STRATEGIES, SAMPLING_STRATEGIES, ENTROPY_D, ENTROPY, ADV_DEEPFOOL, ADV_BIM, BALD, \
-        KALS, DROPOUTS, KAL_XAI_DROP_DU, KAL_XAI_DU, KAL_DU, KAL_DROP_DU
+    KALS, DROPOUTS, KAL_XAI_DROP_DU, KAL_XAI_DU, KAL_DU, KAL_DROP_DU, KAL, KAL_XAI
     from kal.knowledge.xor import XORLoss, steep_sigmoid
     from kal.metrics import F1
     from kal.network import MLP, train_loop, evaluate, predict_dropout, predict
@@ -55,7 +55,7 @@ if __name__ == "__main__":
     print(f"Working on {dev}")
 
     # strategies = STRATEGIES
-    strategies = [KAL_XAI_DU]
+    strategies =  [KAL_XAI_DU, KAL_DU,]
 
     # %% md
     #### Generating and visualizing data for the xor problem
@@ -66,7 +66,7 @@ if __name__ == "__main__":
     tot_points = 100000
     first_points = 10
     n_points = 5
-    rand_points = 2
+    rand_points = 0
     n_iterations = (100 - first_points) // n_points
     input_size = 2
     hidden_size = 200
@@ -138,16 +138,17 @@ if __name__ == "__main__":
                                                             hidden_size=hidden_size,
                                                             dev=dev, cv=False,
                                                             class_names=["x0", "x1"],
-                                                            mutual_excl=True, double_imp=True,
+                                                            mutual_excl=False, double_imp=True,
                                                             discretize_feats=discretize_feats)
             df_file = os.path.join(result_folder, f"metrics_{n_points}_points_"
                                                   f"{seed}_seed_{strategy}_strategy.pkl")
             if os.path.exists(df_file) and load:
                 df = pd.read_pickle(df_file)
                 dfs.append(df)
-                auc = df['Test Accuracy'].mean()
-                print(f"Already trained {df_file}, auc: {auc}")
-                continue
+                if "Test Accuracy" in df.columns:
+                    auc = df['Test Accuracy'].mean()
+                    print(f"Already trained {df_file}, auc: {auc}")
+                    continue
 
             df = {
                 "Strategy": [],
@@ -165,7 +166,7 @@ if __name__ == "__main__":
                 "Test Idx": []
             }
 
-            if strategy in [ADV_DEEPFOOL, ADV_BIM, ENTROPY, ENTROPY_D, BALD, KAL_XAI_DU, KAL_XAI_DROP_DU]:
+            if strategy in [ADV_DEEPFOOL, ADV_BIM, ENTROPY, ENTROPY_D, BALD]:
                 n_classes = 2
                 x_train, y_train = x_t[train_idx], y_multi_t[train_idx]
                 x_test, y_test = x_t[test_idx], y_multi_t[test_idx]
@@ -193,15 +194,14 @@ if __name__ == "__main__":
                 train_accuracy, _, preds_t = evaluate(net, train_dataset, loss=loss, device=dev,
                                                       return_preds=True, labelled_idx=used_idx)
                 pred_t = time.time() - t
-                print(f"Pred time {pred_t:2f}")
+                # print(f"Pred time {pred_t:2f}")
                 if strategy in DROPOUTS:
                     t = time.time()
                     preds_dropout = predict_dropout(net, train_dataset)
                     assert (preds_dropout - preds_t).abs().sum() > .1, \
                         "Error in computing dropout predictions"
                     pred_t = time.time() - t
-                    print(f"Dropout time {pred_t:2f}")
-
+                    # print(f"Dropout time {pred_t:2f}")
                 else:
                     preds_dropout = None
 
@@ -212,7 +212,9 @@ if __name__ == "__main__":
                                                                     n_points, x=x_train,
                                                                     labels=y_train,
                                                                     preds_dropout=preds_dropout,
-                                                                    clf=net, dataset=train_dataset)
+                                                                    clf=net, dataset=train_dataset,
+                                                                    # formulas=["x0 & ~x1 | x1 & ~x0"]
+                                                                    )
                 used_time = time.time() - t
                 used_idx += active_idx
 
@@ -230,6 +232,11 @@ if __name__ == "__main__":
                 df["Train Idx"].append(train_idx)
                 df["Test Idx"].append(test_idx)
 
+                # visualize_data_predictions(x_t, it, strategy, pd.DataFrame(df), None,
+                #                            seed=seed)
+                # visualize_data_predictions(x_t, it, strategy, pd.DataFrame(df), None,
+                #                            seed=seed, active_loss=True)
+
                 assert isinstance(used_idx, list), "Error"
 
                 pbar.set_description(f"{strategy} {seed + 1}/{seeds}, "
@@ -237,6 +244,7 @@ if __name__ == "__main__":
                                      f"test auc: {np.mean(df['Test Accuracy']):.2f}, "
                                      f"a_l: {active_loss.mean().item():.2f}, "
                                      f"l: {losses[-1]:.2f}, p: {len(used_idx)}")
+                print()
 
             if seed == 0:
                 sns.lineplot(data=losses)

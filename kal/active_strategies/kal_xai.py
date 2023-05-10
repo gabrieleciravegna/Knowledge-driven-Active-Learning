@@ -26,8 +26,9 @@ class KALXAISampling(Strategy):
         self.main_classes = main_classes
         self.mutual_excl = mutual_excl
         self.double_imp = double_imp
+        self.discretize_feats = discretize_feats
 
-    def loss(self, preds, *args, formulas=None, uncertainty=False,
+    def loss(self, preds, *args, formulas=None, uncertainty=False, labels=None,
              x=None, preds_dropout=None, return_argmax=False, **kwargs) \
             -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
         if self.cv:
@@ -51,7 +52,8 @@ class KALXAISampling(Strategy):
                 c_loss, arg_max = k_loss(preds, return_argmax=True)
         else:
             k_loss = Expl_2_Loss(self.class_names, formulas, uncertainty=uncertainty,
-                                 mutual_excl=self.mutual_excl, double_imp=self.double_imp)
+                                 mutual_excl=self.mutual_excl, double_imp=self.double_imp,
+                                 discretize_feats=self.discretize_feats)
             x = x.to(preds.device)
             c_loss, arg_max = k_loss(preds, x=x, return_argmax=True)
 
@@ -60,7 +62,7 @@ class KALXAISampling(Strategy):
         return c_loss
 
     def selection(self, preds: torch.Tensor, labelled_idx: list, n_p: int, *args,
-                  labels=None, diversity=False, x=None, c_loss=None, arg_max=None,
+                  labels=None, diversity=False, x=None, c_loss=None, arg_max=None, formulas=None,
                   preds_dropout=None, debug=False, **kwargs) -> Tuple[List[np.ndarray], torch.Tensor]:
 
         n_classes = labels.shape[1] if len(labels.shape) > 1 else 1
@@ -69,18 +71,20 @@ class KALXAISampling(Strategy):
                (c_loss is None and arg_max is None), \
                "Both c_loss and arg max has to be passed to the KAL selection, or none of them"
 
-        if self.cv:
-            if len(self.main_classes) == n_classes:
-                formulas = self.xai_model.explain_cv_multi_class(n_classes, preds, labelled_idx)
+        if formulas is None:
+            if self.cv:
+                if len(self.main_classes) == n_classes:
+                    formulas = self.xai_model.explain_cv_multi_class(n_classes, preds, labelled_idx)
+                else:
+                    formulas = self.xai_model.explain_cv(n_classes, preds, labelled_idx, self.main_classes)
             else:
-                formulas = self.xai_model.explain_cv(n_classes, preds, labelled_idx, self.main_classes)
-        else:
-            formulas = self.xai_model.explain(x, labels, labelled_idx)
-        print("Extracted formulas:", formulas)
+                formulas = self.xai_model.explain(x, preds, labelled_idx)
+        if debug:
+            print("Extracted formulas:", formulas)
 
         if c_loss is None and arg_max is None:
-            c_loss, arg_max = self.loss(preds, x=x, formulas=formulas,
-                                        preds_dropout=preds_dropout, return_argmax=True)
+            c_loss, arg_max = self.loss(preds, x=x, formulas=formulas, preds_dropout=preds_dropout,
+                                        labels=labels, return_argmax=True, **kwargs)
 
         selected_idx, c_loss = KALSampling.selection(self, preds, labelled_idx, n_p, labels=labels,
                                                      diversity=diversity, x=x, c_loss=c_loss, arg_max=arg_max,
@@ -126,7 +130,7 @@ class KALXAIDropSampling(KALXAISampling):
         return super().loss(preds_dropout, *args, **kwargs)
 
 
-class KALDropUncSampling(KALXAIDropSampling):
+class KALXAIDropUncSampling(KALXAIDropSampling):
     def loss(self, *args, **kwargs) -> torch.Tensor:
         kwargs['uncertainty'] = True
         return super().loss(*args, **kwargs)
@@ -149,4 +153,5 @@ class KALXAIDropDiversityUncSampling(KALXAIDropSampling):
         if "diversity" in kwargs:
             kwargs.pop("diversity")
         return super().selection(*args, diversity=True, **kwargs)
+
 

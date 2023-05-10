@@ -90,7 +90,7 @@ if __name__ == "__main__":
 
     #%% md
 
-    #### Loading data for the animal's problem.
+    #### Loading data for the CELEBA problem.
     # Data pass through a RESNET 50 first which extract the data features
 
     #%%

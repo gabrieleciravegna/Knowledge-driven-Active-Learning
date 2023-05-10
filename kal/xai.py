@@ -83,7 +83,7 @@ class XAI_TREE(XAI):
         np.random.seed(0)
 
         formulas = []
-        n_classes = labels.shape[1] if len(labels.shape) > 1 else 2
+        classes = range(labels.shape[1]) if len(labels.squeeze().shape) > 1 else [1]
         expl_feats, expl_labels = x[labelled_idx].cpu(), labels[labelled_idx].cpu() > 0.5
         if self.discretize_feats:
             expl_feats = expl_feats > 0.5
@@ -93,8 +93,9 @@ class XAI_TREE(XAI):
                             expl_model.predict(expl_feats), average="macro", zero_division=1)
         if expl_acc < 0.9 and len(labelled_idx) > 10 and not self.discretize_feats:
             print(f"Low expl_accs: {expl_acc} Error in training the explainer")
-        for i in range(n_classes):
-            formula = tree_to_formula(expl_model, self.class_names, target_class=i)
+        for i in classes:
+            formula = tree_to_formula(expl_model, self.class_names, target_class=i,
+                                      discretize_feats=self.discretize_feats)
             formulas.append(formula)
         return formulas
 
