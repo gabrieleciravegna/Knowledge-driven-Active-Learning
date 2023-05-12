@@ -280,7 +280,7 @@ def tree_to_formula(tree: DecisionTreeClassifier, concept_names: List[str], targ
                 new_expl = new_expl[:-3] + ") | "
         explanation = new_expl[:-3]
     if simplify and explanation != "" and discretize_feats:
-        explanation = simplify_logic(explanation, force=True)
+        explanation = simplify_logic(explanation)
         explanation = str(explanation)
 
     return explanation

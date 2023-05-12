@@ -184,13 +184,15 @@ class Expl_2_Loss(KnowledgeLoss):
 class Expl_2_Loss_CV(Expl_2_Loss):
 
     def __init__(self, names: List[str], expl: List[str], uncertainty: bool, main_classes: Sized,
-                 attribute_classes: Sized, unc_all=True, mutual_excl=False, double_imp=True, percentage=None):
+                 attribute_classes: Sized, unc_all=True, mutual_excl=False, double_imp=True, percentage=None,
+                 attribute_to_classes=False):
         self.n_classes = len(names)
         self.main_classes = main_classes
         self.attribute_classes = attribute_classes
         super().__init__(names, expl, uncertainty=uncertainty, mutual_excl=mutual_excl,
                          double_imp=double_imp, percentage=percentage)
         self.unc_all = unc_all
+        self.attribute_to_classes = attribute_to_classes
 
     def __call__(self, output, x=None, targets=False, return_argmax=False, return_losses=False) \
             -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
@@ -204,14 +206,16 @@ class Expl_2_Loss_CV(Expl_2_Loss):
         self.uncertainty = False
 
         # class <-> attributes
-        self.expl, self.names = expl[self.main_classes], names[self.attribute_classes]
-        x = output[:, self.attribute_classes]
-        f = output[:, self.main_classes]
-        class_losses = super().__call__(f, x, targets, return_losses=True)
+        class_losses = torch.zeros(output.shape[0], 1)
+        if not self.attribute_to_classes:
+            self.expl, self.names = expl[self.main_classes], names[self.attribute_classes]
+            x = output[:, self.attribute_classes]
+            f = output[:, self.main_classes]
+            class_losses = super().__call__(f, x, targets, return_losses=True)
 
         # attribute <-> classes
-        attr_losses = torch.zeros_like(class_losses)
-        if len(expl) == len(self.main_classes) + len(self.attribute_classes):
+        attr_losses = torch.zeros(output.shape[0], 1)
+        if self.attribute_to_classes or (len(expl) == len(self.main_classes) + len(self.attribute_classes)):
             self.expl, self.names = expl[self.attribute_classes], names[self.main_classes]
             x = output[:, self.main_classes]
             f = output[:, self.attribute_classes]

@@ -138,15 +138,17 @@ class XAI_TREE(XAI):
 
         return formulas
 
-    def explain_cv_multi_class(self, n_classes, labels, labelled_idx) -> List:
+    def explain_cv_multi_class(self, labels, classes_to_exp, labelled_idx=None) -> List:
         from kal.utils import tree_to_formula
         np.random.seed(0)
+        if labelled_idx is None:
+            labelled_idx = [*range(len(labels))]
 
         expl_accs = []
         formulas, formulas2 = [], []
         train_labels = labels[labelled_idx].cpu().numpy()
-        for i in range(n_classes):
-            non_i_classes = np.asarray([j for j in range(n_classes) if j != i])
+        for i in classes_to_exp:
+            non_i_classes = np.asarray([j for j in range(labels.shape[1]) if j != i])
             expl_label = train_labels[:, i] > 0.5
             expl_feats = train_labels[:, non_i_classes]
             if self.discretize_feats:

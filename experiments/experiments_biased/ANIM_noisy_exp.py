@@ -8,11 +8,13 @@
 # %% md
 import math
 import os
+import shutil
 from functools import partial
 
 import sklearn.model_selection
 
 from kal.knowledge import AnimalLoss
+from kal.knowledge.expl_to_bias import Expl_2_Bias
 
 os.environ["CUDA_VISIBLE_DEVICES"] = ""
 
@@ -56,6 +58,9 @@ if not os.path.isdir(image_folder):
     os.makedirs(image_folder)
 data_folder = os.path.join("..", "..", "data", "Animals")
 assert os.path.exists(data_folder), f"Unable to locate {data_folder}"
+annoying_dir = os.path.join(data_folder, "__pycache__")
+if os.path.isdir(annoying_dir):
+    shutil.rmtree(annoying_dir)
 
 set_seed(0)
 
@@ -73,8 +78,8 @@ strategies = [KAL_DU, KAL_DEBIAS, KAL_DEBIAS_DU, RANDOM, UNCERTAINTY]
 # %%
 
 # %%
-first_points = 100
-n_points = 1000
+first_points = 1000
+n_points = 50
 rand_points = 0
 n_iterations = (1250 - first_points) // n_points
 seeds = 5
@@ -87,7 +92,7 @@ attribute_classes = range(7, 33)
 discretize_feats = True
 metric = F1()
 height = None
-load = True
+load = False
 print("Rand points", rand_points)
 
 # The train dataset is composed of 19/20 of biased data (falling in the left quadrants)
@@ -168,32 +173,29 @@ test_sample = len(test_dataset)
 #### Visualizing and checking bias loss on the biased labels
 bias = [""] * n_classes
 bias[penguin_class] = "FLY"
+bias[fly_class] = "PENGUIN"
 xai_model = XAI_TREE(discretize_feats=True,
                      class_names=class_names, dev=dev)
 c_loss = Expl_2_Loss_CV(class_names, expl=bias, uncertainty=False,
-                        main_classes=attribute_classes, attribute_classes=main_classes,
-                        double_imp=False)
+                        main_classes=main_classes, attribute_classes=attribute_classes,
+                        double_imp=False, attribute_to_classes=True, unc_all=False)
+b_loss = Expl_2_Bias(c_loss)
 
-penguin_label_train = y_train[penguin_idx]
-penguin_idx_test = torch.where(y_test[:, penguin_class])[0]
-penguin_label_test = y_test[penguin_idx_test]
-bias_measure_train = 1 - c_loss(penguin_label_train)
-bias_measure_test = 1 - c_loss(penguin_label_test)
+bias_measure_train = b_loss(y_train, penguin_class)
+bias_measure_test = b_loss(y_test, penguin_class)
 print(f"Mean Bias in the training data: {bias_measure_train.mean():.2f}, "
       f"test {bias_measure_test.mean():.2f}")
-sns.scatterplot(x=penguin_label_test[:, penguin_class].cpu(),
-                y=penguin_label_test[:, fly_class].cpu(),
-                hue=bias_measure_test.cpu(), legend=True).set_title("Clean Labelling")
-plt.show()
-sns.scatterplot(x=penguin_label_train[:, penguin_class].cpu(),
-                y=penguin_label_train[:, fly_class].cpu(),
-                hue=bias_measure_train.cpu(), legend=True).set_title("Noisy Labelling")
-plt.show()
+# sns.scatterplot(x=penguin_label_test[:, penguin_class].cpu(),
+#                 y=penguin_label_test[:, fly_class].cpu(),
+#                 hue=bias_measure_test.cpu(), legend=True).set_title("Clean Labelling")
+# plt.show()
+# sns.scatterplot(x=penguin_label_train[:, penguin_class].cpu(),
+#                 y=penguin_label_train[:, fly_class].cpu(),
+#                 hue=bias_measure_train.cpu(), legend=True).set_title("Noisy Labelling")
+# plt.show()
 
-penguin_expl_train = xai_model.\
-    explain_cv_multi_class(n_classes, y_train, [i for i in range(train_sample)])[penguin_class]
-penguin_expl_test = xai_model.\
-    explain_cv_multi_class(n_classes, y_test, [i for i in range(test_sample)])[penguin_class]
+penguin_expl_train = xai_model.explain_cv_multi_class(y_train, [penguin_class])[0]
+penguin_expl_test = xai_model.explain_cv_multi_class(y_test, [penguin_class])[0]
 print(f"Train: Penguin <-> {penguin_expl_train}, bias in train set: {bias[penguin_class] in penguin_expl_train}\n"
       f"Test: Penguin <-> {penguin_expl_test}, bias in test set: {bias[penguin_class] in penguin_expl_test}")
 
@@ -210,12 +212,13 @@ for seed in range(seeds):
 
     for strategy in strategies:
         active_strategy = SAMPLING_STRATEGIES[strategy](k_loss=KLoss,
-                                                        main_classes=[0],
+                                                        main_classes=main_classes,
                                                         rand_points=rand_points,
                                                         hidden_size=hidden_size,
-                                                        dev=dev, cv=False,
+                                                        dev=dev, cv=True,
                                                         class_names=class_names,
                                                         mutual_excl=False, double_imp=True,
+                                                        attribute_to_classes=True,
                                                         discretize_feats=discretize_feats)
         if first_points == 10:
             df_file = os.path.join(result_folder, f"metrics_{n_points}_points_"
@@ -235,13 +238,13 @@ for seed in range(seeds):
         metric = F1()
 
         set_seed(0)
-        net = MLP(n_classes, input_size, hidden_size, dropout=True).to(dev)
 
         # first training with few randomly selected data
         losses = []
         used_idx = first_idx.copy()
         for it in (pbar := tqdm.trange(n_iterations)):
-            losses += train_loop(net, train_dataset, used_idx, epochs,
+            net = MLP(n_classes, input_size, hidden_size, dropout=True).to(dev)
+            losses += train_loop(net, train_dataset, used_idx, epochs * 2,
                                  lr=lr, loss=loss)
             train_accuracy, _, preds_train = evaluate(net, train_dataset, loss=loss, device=dev,
                                                       return_preds=True, labelled_idx=used_idx)
@@ -255,14 +258,15 @@ for seed in range(seeds):
             test_accuracy, sup_loss, preds_test = evaluate(net, test_dataset, metric=metric,
                                                            device=dev, return_preds=True,
                                                            loss=loss)
-            bias_loss = c_loss(preds_train[penguin_idx])
-            bias_measure = 1 - c_loss(preds_test[penguin_idx_test]).mean().item()
+            bias_loss = c_loss(preds_train)
+            bias_measure = 1 - c_loss(preds_test).mean().item()
             bias_measure = ((bias_measure - bias_measure_test.mean()) /
                             (bias_measure_train.mean() - bias_measure_test.mean())).item()  # Normalized
-            expl_formulas = xai_model.explain_cv_multi_class(n_classes, preds_test, [1 for _ in range(test_sample)])
+            expl_formulas = xai_model.explain_cv_multi_class(preds_test, [penguin_class])[0]
+
             biased_model = bias[penguin_class] in expl_formulas
             print(expl_formulas)
-            print(f"Bias in dataset: {1 - c_loss(y_train[used_idx], x_train[used_idx]).mean():.2f}")
+            print(f"Bias in dataset: {b_loss(y_train[used_idx], penguin_class).mean():.2f}")
 
             t = time.time()
 
@@ -303,13 +307,13 @@ for seed in range(seeds):
                                  f"bias: {bias_measure:.2f}, "
                                  f"p: {len(used_idx)}")
 
-            if (it == 0 or it == n_iterations - 1) and seed == 0:
-                visualize_data_predictions(x_train, it, strategy, pd.DataFrame(df), None,
-                                           seed=seed)
-                visualize_data_predictions(x_train, it, strategy, pd.DataFrame(df), None,
-                                           seed=seed, bias=True)
-                sns.scatterplot(x=x_train[used_idx, 0], y=x_train[used_idx, 1], hue=y_train[used_idx])
-                plt.show()
+            # if (it == 0 or it == n_iterations - 1) and seed == 0:
+            #     visualize_data_predictions(x_train, it, strategy, pd.DataFrame(df), None,
+            #                                seed=seed)
+            #     visualize_data_predictions(x_train, it, strategy, pd.DataFrame(df), None,
+            #                                seed=seed, bias=True)
+            #     sns.scatterplot(x=x_train[used_idx, 0], y=x_train[used_idx, 1], hue=y_train[used_idx])
+            #     plt.show()
 
         if seed == 0:
             sns.lineplot(data=losses)

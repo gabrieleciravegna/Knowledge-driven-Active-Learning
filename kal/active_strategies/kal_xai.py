@@ -13,7 +13,9 @@ from kal.xai import XAI_TREE
 class KALXAISampling(Strategy):
     def __init__(self, rand_points=0, dev=torch.device("cpu"), cv=False, class_names=None,
                  xai_model=XAI_TREE, hidden_size=100, epochs=200, lr=0.001, height=None,
-                 main_classes=None, mutual_excl=False, double_imp=True, discretize_feats=False, **kwargs):
+                 main_classes=None, mutual_excl=False, double_imp=True, discretize_feats=False,
+                 attribute_to_classes=False,
+                 **kwargs):
         super(KALXAISampling, self).__init__()
         assert class_names is not None, "Need to pass the names of the classes/features " \
                                         "for which to extracts the explanations"
@@ -27,6 +29,7 @@ class KALXAISampling(Strategy):
         self.mutual_excl = mutual_excl
         self.double_imp = double_imp
         self.discretize_feats = discretize_feats
+        self.attribute_to_class = attribute_to_classes
 
     def loss(self, preds, *args, formulas=None, uncertainty=False, labels=None,
              x=None, preds_dropout=None, return_argmax=False, **kwargs) \
@@ -48,7 +51,8 @@ class KALXAISampling(Strategy):
                 attribute_classes = [*range(len(self.main_classes), len(self.class_names))]
                 k_loss = Expl_2_Loss_CV(self.class_names, formulas, uncertainty,
                                         self.main_classes, attribute_classes,
-                                        mutual_excl=self.mutual_excl, double_imp=self.double_imp)
+                                        mutual_excl=self.mutual_excl, double_imp=self.double_imp,
+                                        attribute_to_classes=self.attribute_to_class,)
                 c_loss, arg_max = k_loss(preds, return_argmax=True)
         else:
             k_loss = Expl_2_Loss(self.class_names, formulas, uncertainty=uncertainty,

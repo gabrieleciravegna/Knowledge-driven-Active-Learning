@@ -10,7 +10,7 @@ class KALDEBIASSampling(KALXAISampling):
     def selection(self, *args, **kwargs):
         labels = kwargs['labels']
         bias = kwargs['bias']
-        kwargs['formulas'] = [bias]
+        kwargs['formulas'] = [bias] if not isinstance(bias, list) else bias
         # if kwargs['biased_model']:
         args = args[1:]
         active_idx, active_loss = super().selection(labels, *args, **kwargs)
