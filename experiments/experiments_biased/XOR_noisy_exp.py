@@ -80,11 +80,10 @@ seeds = 10
 lr = 1e-3
 epochs = 250
 discretize_feats = True
-height = None
 feature_names = ["x0", "x1"]
 bias = "x1 & ~x0"
 xai_model = XAI_TREE(discretize_feats=True,
-                     height=height, class_names=feature_names, dev=dev)
+                     class_names=feature_names, dev=dev)
 c_loss = Expl_2_Loss(feature_names, expl=[bias], uncertainty=False, double_imp=True, discretize_feats=discretize_feats)
 
 ### CREATING A NOISY TRAIN DATASET: X1
@@ -133,18 +132,13 @@ train_sample = len(train_dataset)
 bias_measure_train = 1 - c_loss(y_train, x_train)
 bias_measure_test = 1 - c_loss(y_test, x_test)
 print(f"Mean Bias in the training data: {bias_measure_train.mean():.2f}, test {bias_measure_test.mean():.2f}")
-
 sns.scatterplot(x=x_train[:, 0].cpu(), y=x_train[:, 1].cpu(), hue=y_train.cpu(), legend=True).set_title("Noisy Labelling")
 plt.show()
-
 sns.scatterplot(x=x_train[:, 0].cpu(), y=x_train[:, 1].cpu(), hue=bias_measure_train.cpu(), legend=True).set_title(f"Bias {bias} level")
 plt.show()
 
-# for seed, (train_idx, test_idx) in enumerate(skf.split(x_t.cpu(), y_t.cpu())):
 for seed in range(seeds):
 
-    # if seed >= 5:
-    #     break
     set_seed(seed)
 
     first_idx = RandomSampling().selection(torch.ones_like(y_train), [], first_points)[0]

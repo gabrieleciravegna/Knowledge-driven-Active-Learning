@@ -211,7 +211,7 @@ class Expl_2_Loss_CV(Expl_2_Loss):
 
         # attribute <-> classes
         attr_losses = torch.zeros_like(class_losses)
-        if len(self.expl) == len(self.main_classes) + len(self.attribute_classes):
+        if len(expl) == len(self.main_classes) + len(self.attribute_classes):
             self.expl, self.names = expl[self.attribute_classes], names[self.main_classes]
             x = output[:, self.main_classes]
             f = output[:, self.attribute_classes]

@@ -6,40 +6,45 @@
 # Knowledge-Driven Active Learning - Experiment on the XOR problem
 
 # %% md
+import math
 import os
+from functools import partial
 
-import sympy
+import sklearn.model_selection
 
-from kal.knowledge.expl_to_loss import Expl_2_Loss
-from kal.xai import XAI_TREE
+from kal.knowledge import AnimalLoss
 
 os.environ["CUDA_VISIBLE_DEVICES"] = ""
 
+import sympy
+import torchvision
 import datetime
 import time
-
 from sklearn.model_selection import StratifiedKFold
 from sklearn.metrics import f1_score
-
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
-import torch
 import tqdm
-from torch.utils.data import TensorDataset
+import torch
+from torchvision.transforms import transforms
+from torch.utils.data import TensorDataset, DataLoader
 
 from kal.active_strategies import STRATEGIES, SAMPLING_STRATEGIES, ENTROPY_D, ENTROPY, ADV_DEEPFOOL, ADV_BIM, BALD, \
-    DROPOUTS, KAL_DEBIAS, KAL_DEBIAS_DU, KAL, KAL_XAI, RANDOM, UNCERTAINTY, RandomSampling, KAL_DU
+    DROPOUTS, KAL, KAL_XAI, RANDOM, UNCERTAINTY, RandomSampling, KAL_DU, KAL_DEBIAS, KAL_DEBIAS_DU
 from kal.knowledge.xor import XORLoss, steep_sigmoid
 from kal.metrics import F1
 from kal.network import MLP, train_loop, evaluate, predict_dropout
 from kal.utils import visualize_data_predictions, set_seed, check_bias_in_exp
+from data.Animals import classes, CLASS_1_HOTS
+from kal.knowledge.expl_to_loss import Expl_2_Loss, Expl_2_Loss_CV
+from kal.xai import XAI_TREE
 
 plt.rc('animation', html='jshtml')
 plt.close('all')
 
-dataset_name = "xor_biased"
+dataset_name = "animals_noisy"
 model_folder = os.path.join("models", dataset_name)
 result_folder = os.path.join("results", dataset_name)
 image_folder = os.path.join("images", dataset_name)
@@ -49,93 +54,156 @@ if not os.path.isdir(result_folder):
     os.makedirs(result_folder)
 if not os.path.isdir(image_folder):
     os.makedirs(image_folder)
+data_folder = os.path.join("..", "..", "data", "Animals")
+assert os.path.exists(data_folder), f"Unable to locate {data_folder}"
 
 set_seed(0)
 
+sns.set_theme(style="whitegrid", font="Times New Roman")
+sns.set_palette(sns.color_palette()[:3])
+now = str(datetime.datetime.now()).replace(":", ".")
 # dev = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 dev = torch.device("cpu")
 print(f"Working on {dev}")
 
 strategies = [KAL_DU, KAL_DEBIAS, KAL_DEBIAS_DU, RANDOM, UNCERTAINTY]
-# strategies = [ KAL_DEBIAS_DU]
 
-print(f"Strategies: {strategies}")
 # %% md
 #### Generating and visualizing data for the xor problem
 # %%
 
-KLoss = XORLoss
-load = False
-tot_points = 100000
+# %%
 first_points = 100
-n_points = 5
+n_points = 1000
 rand_points = 0
-n_iterations = (200 - first_points) // n_points
-input_size = 2
-hidden_size = 200
-seeds = 10
+n_iterations = (1250 - first_points) // n_points
+seeds = 5
+hidden_size = 100
 lr = 1e-3
 epochs = 250
+noisy_percentage = 0.9
+main_classes = range(7)
+attribute_classes = range(7, 33)
 discretize_feats = True
-feature_names = ["x0", "x1"]
-bias = "x1"
-xai_model = XAI_TREE(discretize_feats=discretize_feats,
-                     class_names=feature_names, dev=dev)
-c_loss = Expl_2_Loss(feature_names, expl=[bias], uncertainty=False, double_imp=True)
+metric = F1()
+height = None
+load = True
+print("Rand points", rand_points)
 
-### CREATING A BIASED TRAIN DATASET: X1
 # The train dataset is composed of 19/20 of biased data (falling in the left quadrants)
 # and only 1/20 of regular data
-x_train_reg = torch.rand(tot_points//20, input_size).to(dev)
-x_train_biased = torch.rand(tot_points, input_size)
-x_train_biased[:, 0] = x_train_biased[:, 0]/2
-x_train = torch.cat((x_train_reg, x_train_biased), dim=0)
-y_train = (((x_train[:, 0] > 0.5) & (x_train[:, 1] < 0.5)) |
-       ((x_train[:, 1] > 0.5) & (x_train[:, 0] < 0.5))
-       ).float().to(dev)
 
-x_test = torch.rand(tot_points//10, input_size).to(dev)
-y_test = (((x_test[:, 0] > 0.5) & (x_test[:, 1] < 0.5)) |
-          ((x_test[:, 1] > 0.5) & (x_test[:, 0] < 0.5))
-          ).float().to(dev)
-n_classes = 1
+# %% md
 
-# %%md
-#### Calculating the prediction of the rule
+#### Loading data for the animal's problem.
+# Data pass through a RESNET 50 first which extract the data features
+
 # %%
+transform = transforms.Compose([
+    transforms.Resize(256),
+    transforms.CenterCrop(224),
+    transforms.ToTensor(),
+    transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                         std=[0.229, 0.224, 0.225]),
+])
+dataset = torchvision.datasets.ImageFolder(data_folder, transform=transform)
 
-discrete_x = steep_sigmoid(x_test, k=10).float()
-x1 = discrete_x[:, 0]
-x2 = discrete_x[:, 1]
-pred_rule = (x1 * (1 - x2)) + (x2 * (1 - x1))
-print("Rule Accuracy:", f1_score(y_test.cpu(), pred_rule.cpu() > 0.5) * 100)
-# sns.scatterplot(x=x_t[:, 0].numpy(), y=x_t[:, 1].numpy(), hue=pred_rule)
-# plt.show()
+feature_extractor = torchvision.models.resnet50(pretrained=True)
+feature_extractor.fc = torch.nn.Identity()
+data_loader = DataLoader(dataset, batch_size=128, num_workers=8)
+tot_points = len(dataset)
+class_names = classes
+n_classes = len(class_names)
+
+feature_file = os.path.join(data_folder, "ResNet50-TL-feats.pth")
+if os.path.isfile(feature_file):
+    x = torch.load(feature_file, map_location=dev)
+    y = dataset.targets
+    y_multi = [CLASS_1_HOTS[dataset.classes[t]] for t in dataset.targets]
+    print("Features loaded")
+else:
+    x, y = [], []
+    with torch.no_grad():
+        feature_extractor.eval(), feature_extractor.to(dev)
+        for i, (batch_data, batch_labels) in enumerate(tqdm.tqdm(data_loader)):
+            batch_x = feature_extractor(batch_data.to(dev))
+            x.append(batch_x)
+            y.append(batch_labels)
+        x = torch.cat(x)
+        y = torch.cat(y)
+        y_multi = [CLASS_1_HOTS[dataset.classes[t]] for t in dataset.targets]
+        torch.save(x, feature_file)
+input_size = x.shape[1]
+
+# %%
+#### Visualizing and checking knowledge loss on the labels
+KLoss = partial(AnimalLoss, names=classes)
+x_t = torch.as_tensor(x, dtype=torch.float).to(dev)
+y_t = torch.as_tensor(y_multi, dtype=torch.float).to(dev)
+x_train, x_test, y_train, y_test = sklearn.model_selection.\
+    train_test_split(x_t, y_t, test_size=int(0.25*len(y_t)))
+cons_loss = KLoss()(y_t).sort()[0].cpu().numpy()
+sns.scatterplot(x=[*range(len(cons_loss))], y=cons_loss)
+plt.show()
+
+penguin_class = class_names.index("PENGUIN")
+penguin_idx = torch.where(y_train[:, penguin_class])[0]
+fly_class = class_names.index("FLY")
+penguin_attributes = torch.where(y_train[penguin_idx[0]])[0][1:]
+
+noisy_labels_num = int(len(penguin_idx)*(noisy_percentage))
+noisy_idx = np.random.choice(penguin_idx, noisy_labels_num, replace=False)
+assert y_train[penguin_idx, fly_class].sum() == 0, "Error in loading data"
+y_train[noisy_idx, fly_class] = 1
+for penguin_attribute in penguin_attributes:
+    y_train[noisy_idx, penguin_attribute] = 0
+print(f"Noisy labels: {noisy_labels_num}. Clean labels: {(y_train[penguin_idx, fly_class]==0).sum()}")
+assert y_train[penguin_idx, fly_class].sum() == math.floor(len(penguin_idx)*(noisy_percentage))
+
+train_dataset = TensorDataset(x_train, y_train)
+test_dataset = TensorDataset(x_test, y_test)
+train_sample = len(train_dataset)
+test_sample = len(test_dataset)
+
+#### Visualizing and checking bias loss on the biased labels
+bias = [""] * n_classes
+bias[penguin_class] = "FLY"
+xai_model = XAI_TREE(discretize_feats=True,
+                     class_names=class_names, dev=dev)
+c_loss = Expl_2_Loss_CV(class_names, expl=bias, uncertainty=False,
+                        main_classes=attribute_classes, attribute_classes=main_classes,
+                        double_imp=False)
+
+penguin_label_train = y_train[penguin_idx]
+penguin_idx_test = torch.where(y_test[:, penguin_class])[0]
+penguin_label_test = y_test[penguin_idx_test]
+bias_measure_train = 1 - c_loss(penguin_label_train)
+bias_measure_test = 1 - c_loss(penguin_label_test)
+print(f"Mean Bias in the training data: {bias_measure_train.mean():.2f}, "
+      f"test {bias_measure_test.mean():.2f}")
+sns.scatterplot(x=penguin_label_test[:, penguin_class].cpu(),
+                y=penguin_label_test[:, fly_class].cpu(),
+                hue=bias_measure_test.cpu(), legend=True).set_title("Clean Labelling")
+plt.show()
+sns.scatterplot(x=penguin_label_train[:, penguin_class].cpu(),
+                y=penguin_label_train[:, fly_class].cpu(),
+                hue=bias_measure_train.cpu(), legend=True).set_title("Noisy Labelling")
+plt.show()
+
+penguin_expl_train = xai_model.\
+    explain_cv_multi_class(n_classes, y_train, [i for i in range(train_sample)])[penguin_class]
+penguin_expl_test = xai_model.\
+    explain_cv_multi_class(n_classes, y_test, [i for i in range(test_sample)])[penguin_class]
+print(f"Train: Penguin <-> {penguin_expl_train}, bias in train set: {bias[penguin_class] in penguin_expl_train}\n"
+      f"Test: Penguin <-> {penguin_expl_test}, bias in test set: {bias[penguin_class] in penguin_expl_test}")
 
 # %%md
 #### Active Learning Strategy Comparison
 # %%
 
 dfs = []
-train_dataset = TensorDataset(x_train, y_train)
-test_dataset = TensorDataset(x_test, y_test)
-train_sample = len(train_dataset)
-
-bias_measure_train = 1 - c_loss(y_train, x_train)
-bias_measure_test = 1 - c_loss(y_test, x_test)
-print(f"Mean Bias in the training data: {bias_measure_train.mean():.2f}, test {bias_measure_test.mean():.2f}")
-
-sns.scatterplot(x=x_train[:, 0].cpu(), y=x_train[:, 1].cpu(), hue=y_train.cpu(), legend=True).set_title("Noisy Labelling")
-plt.show()
-
-sns.scatterplot(x=x_train[:, 0].cpu(), y=x_train[:, 1].cpu(), hue=1 - bias_measure_train.cpu(), legend=True).set_title(f"Bias {bias} level")
-plt.show()
-
-# for seed, (train_idx, test_idx) in enumerate(skf.split(x_t.cpu(), y_t.cpu())):
 for seed in range(seeds):
 
-    # if seed >= 5:
-    #     break
     set_seed(seed)
 
     first_idx = RandomSampling().selection(torch.ones_like(y_train), [], first_points)[0]
@@ -146,7 +214,7 @@ for seed in range(seeds):
                                                         rand_points=rand_points,
                                                         hidden_size=hidden_size,
                                                         dev=dev, cv=False,
-                                                        class_names=feature_names,
+                                                        class_names=class_names,
                                                         mutual_excl=False, double_imp=True,
                                                         discretize_feats=discretize_feats)
         if first_points == 10:
@@ -187,12 +255,12 @@ for seed in range(seeds):
             test_accuracy, sup_loss, preds_test = evaluate(net, test_dataset, metric=metric,
                                                            device=dev, return_preds=True,
                                                            loss=loss)
-            bias_loss = c_loss(preds_train, x_train)
-            bias_measure = 1 - c_loss(preds_test, x_test).mean().item()
+            bias_loss = c_loss(preds_train[penguin_idx])
+            bias_measure = 1 - c_loss(preds_test[penguin_idx_test]).mean().item()
             bias_measure = ((bias_measure - bias_measure_test.mean()) /
                             (bias_measure_train.mean() - bias_measure_test.mean())).item()  # Normalized
-            expl_formulas = xai_model.explain(x_test, preds_test, range(len(y_test)))
-            biased_model = int(check_bias_in_exp(expl_formulas[0], bias))
+            expl_formulas = xai_model.explain_cv_multi_class(n_classes, preds_test, [1 for _ in range(test_sample)])
+            biased_model = bias[penguin_class] in expl_formulas
             print(expl_formulas)
             print(f"Bias in dataset: {1 - c_loss(y_train[used_idx], x_train[used_idx]).mean():.2f}")
 
@@ -260,7 +328,6 @@ dfs = pd.concat(dfs).reset_index()
 # dfs.to_pickle(f"{result_folder}\\metrics_{n_points}_points_{now}.pkl")
 dfs.to_pickle(f"{result_folder}\\results.pkl")
 
-
 dfs['# points'] = dfs['Iteration']*n_points + first_points
 mean_auc = dfs.groupby("Strategy").mean().round(2)['Test Accuracy']
 std_auc = dfs.groupby(["Strategy", "Seed"]).mean().groupby("Strategy").std().round(2)['Test Accuracy']
@@ -282,7 +349,6 @@ sns.lineplot(data=dfs, x='# points', y="Biased Model", hue="Strategy")
 plt.title(f"Biased Models in iterations among different strategies")
 plt.savefig(os.path.join(image_folder, f"Biased Model {strategies}"))
 plt.show()
-# %% md
 
 ### Displaying some pictures to visualize training
 

@@ -103,6 +103,7 @@ class XAI_TREE(XAI):
         from kal.utils import tree_to_formula
         np.random.seed(0)
 
+        attribute_classes = [idx for idx in range(n_classes) if idx not in main_classes]
         expl_accs = []
         formulas = []
         expl_feats = labels[:, len(main_classes):].cpu().numpy()
@@ -154,11 +155,13 @@ class XAI_TREE(XAI):
             expl_model = DecisionTreeClassifier(max_depth=self.height)
             expl_model.fit(expl_feats, expl_label)
             expl_accs += [f1_score(expl_label, expl_model.predict(expl_feats), average="macro", zero_division=1)]
-            formula = tree_to_formula(expl_model, expl_names, target_class=1)
+            formula = tree_to_formula(expl_model, expl_names, target_class=1,
+                                      discretize_feats=self.discretize_feats)
             formulas += [formula]
             formulas2 += [f"{self.class_names[i]} <-> {formula}"]
 
         return formulas
+
 
 class ELEN(MLP):
     def __init__(self, *args, **kwargs):
