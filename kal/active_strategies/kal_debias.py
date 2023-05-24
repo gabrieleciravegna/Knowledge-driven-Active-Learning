@@ -20,8 +20,9 @@ class KALDEBIASSampling(KALXAISampling):
         active_sample_bias = 1 - active_loss[active_idx].mean()
         if active_sample_bias > 0.5:
             x = kwargs['x']
-            sns.scatterplot(x=x[active_idx, 0], y=x[active_idx, 1], hue=labels[active_idx])
-            plt.show()
+            if len(labels.squeeze().shape) == 1:
+                sns.scatterplot(x=x[active_idx, 0], y=x[active_idx, 1], hue=labels[active_idx])
+                plt.show()
             raise ValueError(f"Error in the debias selection strategy. "
                              f"Bias in the selected data: {active_sample_bias}")
         return active_idx, active_loss

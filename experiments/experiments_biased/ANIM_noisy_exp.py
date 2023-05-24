@@ -38,7 +38,7 @@ from kal.active_strategies import STRATEGIES, SAMPLING_STRATEGIES, ENTROPY_D, EN
 from kal.knowledge.xor import XORLoss, steep_sigmoid
 from kal.metrics import F1
 from kal.network import MLP, train_loop, evaluate, predict_dropout
-from kal.utils import visualize_data_predictions, set_seed, check_bias_in_exp
+from kal.utils import visualize_data_predictions, set_seed, check_bias_in_exp, check_bias_in_exp_cv
 from data.Animals import classes, CLASS_1_HOTS
 from kal.knowledge.expl_to_loss import Expl_2_Loss, Expl_2_Loss_CV
 from kal.xai import XAI_TREE
@@ -65,13 +65,12 @@ if os.path.isdir(annoying_dir):
 set_seed(0)
 
 sns.set_theme(style="whitegrid", font="Times New Roman")
-sns.set_palette(sns.color_palette()[:3])
 now = str(datetime.datetime.now()).replace(":", ".")
 # dev = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 dev = torch.device("cpu")
 print(f"Working on {dev}")
 
-strategies = [KAL_DU, KAL_DEBIAS, KAL_DEBIAS_DU, RANDOM, UNCERTAINTY]
+strategies = [KAL_DEBIAS, KAL_DU, KAL_DEBIAS_DU, RANDOM, UNCERTAINTY]
 
 # %% md
 #### Generating and visualizing data for the xor problem
@@ -79,18 +78,21 @@ strategies = [KAL_DU, KAL_DEBIAS, KAL_DEBIAS_DU, RANDOM, UNCERTAINTY]
 
 # %%
 first_points = 1000
-n_points = 50
+n_points = 100
 rand_points = 0
-n_iterations = (1250 - first_points) // n_points
-seeds = 5
+n_iterations = (2000 - first_points) // n_points
+seeds = 3
 hidden_size = 100
 lr = 1e-3
 epochs = 250
-noisy_percentage = 0.9
+noisy_percentage = 0.1
 main_classes = range(7)
 attribute_classes = range(7, 33)
 discretize_feats = True
+
+loss = torch.nn.BCEWithLogitsLoss(reduction="none")
 metric = F1()
+
 height = None
 load = False
 print("Rand points", rand_points)
@@ -152,7 +154,7 @@ sns.scatterplot(x=[*range(len(cons_loss))], y=cons_loss)
 plt.show()
 
 penguin_class = class_names.index("PENGUIN")
-penguin_idx = torch.where(y_train[:, penguin_class])[0]
+penguin_idx = torch.where(y_train[:, penguin_class])[0].cpu()
 fly_class = class_names.index("FLY")
 penguin_attributes = torch.where(y_train[penguin_idx[0]])[0][1:]
 
@@ -179,12 +181,15 @@ xai_model = XAI_TREE(discretize_feats=True,
 c_loss = Expl_2_Loss_CV(class_names, expl=bias, uncertainty=False,
                         main_classes=main_classes, attribute_classes=attribute_classes,
                         double_imp=False, attribute_to_classes=True, unc_all=False)
-b_loss = Expl_2_Bias(c_loss)
+b_loss = Expl_2_Bias(c_loss, penguin_class)
 
-bias_measure_train = b_loss(y_train, penguin_class)
-bias_measure_test = b_loss(y_test, penguin_class)
+bias_measure_train = b_loss(y_train, return_tensor=True)
+bias_measure_test = b_loss(y_test, return_tensor=True)
+# b_loss.set_normalization_values(bias_measure_train.mean(), bias_measure_test.mean())
 print(f"Mean Bias in the training data: {bias_measure_train.mean():.2f}, "
       f"test {bias_measure_test.mean():.2f}")
+
+
 # sns.scatterplot(x=penguin_label_test[:, penguin_class].cpu(),
 #                 y=penguin_label_test[:, fly_class].cpu(),
 #                 hue=bias_measure_test.cpu(), legend=True).set_title("Clean Labelling")
@@ -220,12 +225,8 @@ for seed in range(seeds):
                                                         mutual_excl=False, double_imp=True,
                                                         attribute_to_classes=True,
                                                         discretize_feats=discretize_feats)
-        if first_points == 10:
-            df_file = os.path.join(result_folder, f"metrics_{n_points}_points_"
+        df_file = os.path.join(result_folder, f"metrics_{first_points}_fp_{n_points}_np_"
                                               f"{seed}_seed_{strategy}_strategy.pkl")
-        else:
-            df_file = os.path.join(result_folder, f"metrics_{first_points}_fp_{n_points}_np_"
-                                                  f"{seed}_seed_{strategy}_strategy.pkl")
         if os.path.exists(df_file) and load:
             df = pd.read_pickle(df_file)
             dfs.append(df)
@@ -233,18 +234,15 @@ for seed in range(seeds):
             print(f"Already trained {df_file}, auc: {auc:.2f}, bias: {b_l:.2f}, biased (%): {b_m:.2f}")
             continue
 
-        df = []
-        loss = torch.nn.BCEWithLogitsLoss(reduction="none")
-        metric = F1()
-
-        set_seed(0)
+        set_seed(seed)
+        net = MLP(n_classes, input_size, hidden_size, dropout=True).to(dev)
 
         # first training with few randomly selected data
+        df = []
         losses = []
         used_idx = first_idx.copy()
         for it in (pbar := tqdm.trange(n_iterations)):
-            net = MLP(n_classes, input_size, hidden_size, dropout=True).to(dev)
-            losses += train_loop(net, train_dataset, used_idx, epochs * 2,
+            losses += train_loop(net, train_dataset, used_idx, epochs,
                                  lr=lr, loss=loss)
             train_accuracy, _, preds_train = evaluate(net, train_dataset, loss=loss, device=dev,
                                                       return_preds=True, labelled_idx=used_idx)
@@ -258,15 +256,12 @@ for seed in range(seeds):
             test_accuracy, sup_loss, preds_test = evaluate(net, test_dataset, metric=metric,
                                                            device=dev, return_preds=True,
                                                            loss=loss)
-            bias_loss = c_loss(preds_train)
-            bias_measure = 1 - c_loss(preds_test).mean().item()
-            bias_measure = ((bias_measure - bias_measure_test.mean()) /
-                            (bias_measure_train.mean() - bias_measure_test.mean())).item()  # Normalized
-            expl_formulas = xai_model.explain_cv_multi_class(preds_test, [penguin_class])[0]
+            bias_loss = c_loss(preds_test)
+            bias_measure = b_loss(preds_test)
+            bias_dataset = b_loss(y_train[used_idx])
 
-            biased_model = bias[penguin_class] in expl_formulas
-            print(expl_formulas)
-            print(f"Bias in dataset: {b_loss(y_train[used_idx], penguin_class).mean():.2f}")
+            expl_formulas = xai_model.explain_cv_multi_class(preds_test, [penguin_class])[0]
+            biased_model = check_bias_in_exp_cv(expl_formulas, bias[penguin_class])
 
             t = time.time()
 
@@ -305,7 +300,10 @@ for seed in range(seeds):
                                  f"test acc: {test_accuracy:.2f}, "
                                  f"biased: {biased_model}, "
                                  f"bias: {bias_measure:.2f}, "
+                                 f"dataset bias: {bias_dataset:.2f}, "
                                  f"p: {len(used_idx)}")
+
+            print("")
 
             # if (it == 0 or it == n_iterations - 1) and seed == 0:
             #     visualize_data_predictions(x_train, it, strategy, pd.DataFrame(df), None,

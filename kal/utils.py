@@ -300,6 +300,18 @@ def check_bias_in_exp(formula, bias):
     return False
 
 
+def check_bias_in_exp_cv(formula: str, bias: str, start_idx=0) -> bool:
+    assert '~(' not in formula, f"Not valid formula: {formula}"
+    try:
+        index = formula.index(bias, start_idx)
+    except ValueError:
+        return False
+    if formula[index - 1] == "~":
+        return check_bias_in_exp_cv(formula, bias, start_idx=index+1)
+    else:
+        return True
+
+
 def inv_steep_sigmoid(x: torch.Tensor, k=100, b=0.5) -> torch.Tensor:
     output: torch.Tensor = 1 / (1 + torch.exp(k * (x - b)))
     return output

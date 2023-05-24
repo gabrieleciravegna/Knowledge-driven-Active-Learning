@@ -205,7 +205,7 @@ class Expl_2_Loss_CV(Expl_2_Loss):
         names = np.asarray(self.names)
         self.uncertainty = False
 
-        # class <-> attributes
+        # attributes -> classes
         class_losses = torch.zeros(output.shape[0], 1)
         if not self.attribute_to_classes:
             self.expl, self.names = expl[self.main_classes], names[self.attribute_classes]
@@ -213,7 +213,7 @@ class Expl_2_Loss_CV(Expl_2_Loss):
             f = output[:, self.main_classes]
             class_losses = super().__call__(f, x, targets, return_losses=True)
 
-        # attribute <-> classes
+        # classes -> attributes
         attr_losses = torch.zeros(output.shape[0], 1)
         if self.attribute_to_classes or (len(expl) == len(self.main_classes) + len(self.attribute_classes)):
             self.expl, self.names = expl[self.attribute_classes], names[self.main_classes]
