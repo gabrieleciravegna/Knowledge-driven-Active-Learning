@@ -147,25 +147,27 @@ input_size = x.shape[1]
 KLoss = partial(AnimalLoss, names=classes)
 x_t = torch.as_tensor(x, dtype=torch.float).to(dev)
 y_t = torch.as_tensor(y_multi, dtype=torch.float).to(dev)
-x_train, x_test, y_train, y_test = sklearn.model_selection.\
-    train_test_split(x_t, y_t, test_size=int(0.25*len(y_t)))
+x_train, x_test, y_train, y_test = sklearn.model_selection. \
+    train_test_split(x_t, y_t, test_size=int(0.25 * len(y_t)))
 cons_loss = KLoss()(y_t).sort()[0].cpu().numpy()
 sns.scatterplot(x=[*range(len(cons_loss))], y=cons_loss)
 plt.show()
 
+### Creating biased dataset for the penguin clas
+# TODO: do it for all the classes!!
 penguin_class = class_names.index("PENGUIN")
 penguin_idx = torch.where(y_train[:, penguin_class])[0].cpu()
 fly_class = class_names.index("FLY")
 penguin_attributes = torch.where(y_train[penguin_idx[0]])[0][1:]
 
-noisy_labels_num = int(len(penguin_idx)*(noisy_percentage))
+noisy_labels_num = int(len(penguin_idx) * (noisy_percentage))
 noisy_idx = np.random.choice(penguin_idx, noisy_labels_num, replace=False)
 assert y_train[penguin_idx, fly_class].sum() == 0, "Error in loading data"
 y_train[noisy_idx, fly_class] = 1
 for penguin_attribute in penguin_attributes:
     y_train[noisy_idx, penguin_attribute] = 0
-print(f"Noisy labels: {noisy_labels_num}. Clean labels: {(y_train[penguin_idx, fly_class]==0).sum()}")
-assert y_train[penguin_idx, fly_class].sum() == math.floor(len(penguin_idx)*(noisy_percentage))
+print(f"Noisy labels: {noisy_labels_num}. Clean labels: {(y_train[penguin_idx, fly_class] == 0).sum()}")
+assert y_train[penguin_idx, fly_class].sum() == math.floor(len(penguin_idx) * (noisy_percentage))
 
 train_dataset = TensorDataset(x_train, y_train)
 test_dataset = TensorDataset(x_test, y_test)
@@ -188,7 +190,6 @@ bias_measure_test = b_loss(y_test, return_tensor=True)
 # b_loss.set_normalization_values(bias_measure_train.mean(), bias_measure_test.mean())
 print(f"Mean Bias in the training data: {bias_measure_train.mean():.2f}, "
       f"test {bias_measure_test.mean():.2f}")
-
 
 # sns.scatterplot(x=penguin_label_test[:, penguin_class].cpu(),
 #                 y=penguin_label_test[:, fly_class].cpu(),
@@ -330,7 +331,7 @@ dfs = pd.concat(dfs).reset_index()
 # dfs.to_pickle(f"{result_folder}\\metrics_{n_points}_points_{now}.pkl")
 dfs.to_pickle(f"{result_folder}\\results.pkl")
 
-dfs['# points'] = dfs['Iteration']*n_points + first_points
+dfs['# points'] = dfs['Iteration'] * n_points + first_points
 mean_auc = dfs.groupby("Strategy").mean().round(2)['Test Accuracy']
 std_auc = dfs.groupby(["Strategy", "Seed"]).mean().groupby("Strategy").std().round(2)['Test Accuracy']
 print("AUC", mean_auc, "+-", std_auc)
